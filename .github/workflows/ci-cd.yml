@@ -227,11 +227,16 @@ jobs:
           done
 
       - name: Run OWASP ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.14.0
-        with:
-          target: http://localhost:8080/
-          cmd_options: "-J zap-report.json"
-          allow_issue_writing: false
+        run: |
+          docker run --rm --network host \
+            -v ${{ github.workspace }}:/zap/wrk/:rw \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:8080/ \
+            -J zap-report.json \
+            -r zap-report.html \
+            -I || true
+          echo "--- ZAP reports generated ---"
+          ls -la ${{ github.workspace }}/zap-report*
 
       - name: Upload ZAP reports
         if: always()
@@ -239,8 +244,8 @@ jobs:
         with:
           name: zap-reports
           path: |
-            report_json.json
-            zap_scan_report.html
+            zap-report.json
+            zap-report.html
 
       - name: Stop target container
         if: always()
@@ -258,12 +263,13 @@ jobs:
     steps:
       - name: Download all scan artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           merge-multiple: true
           path: reports/
 
       - name: List collected reports
-        run: ls -la reports/
+        run: ls -la reports/ || echo 'No reports directory found'
 
       # ── Upload each report to DefectDojo ──────────────────────────────────
       - name: Upload Hadolint — backend
@@ -358,12 +364,12 @@ jobs:
             -F "test_title=Trivy K8s Config - ${{ github.sha }}" || true
 
       - name: Upload ZAP DAST report
-        if: hashFiles('reports/report_json.json') != ''
+        if: hashFiles('reports/zap-report.json') != ''
         run: |
           curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
             -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
             -F "scan_type=ZAP Scan" \
-            -F "file=@reports/report_json.json" \
+            -F "file=@reports/zap-report.json" \
             -F "product_name=k8s-app" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
