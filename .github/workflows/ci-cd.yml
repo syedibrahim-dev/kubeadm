@@ -158,31 +158,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+          trivy --version
+
       - name: Build backend image locally for scanning
         run: |
           docker build -t ${{ env.BACKEND_IMAGE }}:scan k8s-app/backend/
 
       - name: Trivy scan — Go backend
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.BACKEND_IMAGE }}:scan
-          format: json
-          output: trivy-backend.json
-          severity: CRITICAL,HIGH,MEDIUM
-          exit-code: "0"
+        run: |
+          trivy image --format json --output trivy-backend.json \
+            --severity CRITICAL,HIGH,MEDIUM \
+            --exit-code 0 \
+            ${{ env.BACKEND_IMAGE }}:scan
 
       - name: Build frontend image locally for scanning
         run: |
           docker build -t ${{ env.FRONTEND_IMAGE }}:scan k8s-app/frontend/
 
       - name: Trivy scan — React frontend
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.FRONTEND_IMAGE }}:scan
-          format: json
-          output: trivy-frontend.json
-          severity: CRITICAL,HIGH,MEDIUM
-          exit-code: "0"
+        run: |
+          trivy image --format json --output trivy-frontend.json \
+            --severity CRITICAL,HIGH,MEDIUM \
+            --exit-code 0 \
+            ${{ env.FRONTEND_IMAGE }}:scan
 
       - name: Upload Trivy reports
         uses: actions/upload-artifact@v4

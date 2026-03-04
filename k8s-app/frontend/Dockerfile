@@ -47,12 +47,12 @@ RUN addgroup -g 1001 -S appgroup && \
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 3. Grant the non-root user permission to NGINX folders
-RUN chown -R appuser:appgroup /usr/share/nginx/html \
+# 3. Fix nginx to run as non-root: move PID file to /tmp and fix ownership
+RUN sed -i 's|/run/nginx.pid|/tmp/nginx.pid|g' /etc/nginx/nginx.conf && \
+    chown -R appuser:appgroup /usr/share/nginx/html \
     /var/cache/nginx \
     /var/log/nginx \
-    /etc/nginx/conf.d \
-    /var/run
+    /etc/nginx/conf.d
 
 # 4. Switch to the secured user
 USER appuser
