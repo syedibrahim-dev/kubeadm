@@ -205,10 +205,25 @@ jobs:
       - name: Build and run frontend container
         run: |
           docker build -t frontend-dast k8s-app/frontend/
-          docker run -d --name frontend-target -p 8080:80 frontend-dast
-          sleep 5
-          # Verify container is responding
-          curl -f http://localhost:8080/ || (docker logs frontend-target && exit 1)
+          # --add-host makes nginx resolve "go-backend" to 127.0.0.1 so it starts
+          # without a real backend. /api/ calls will 502 but the frontend serves fine.
+          docker run -d --name frontend-target \
+            --add-host=go-backend:127.0.0.1 \
+            -p 8080:80 \
+            frontend-dast
+          # Wait up to 30s for nginx to be ready
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/ > /dev/null 2>&1; then
+              echo "Frontend is ready after ${i}s"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Timed out waiting for frontend. Container logs:"
+              docker logs frontend-target
+              exit 1
+            fi
+            sleep 1
+          done
 
       - name: Run OWASP ZAP baseline scan
         uses: zaproxy/action-baseline@v0.14.0
