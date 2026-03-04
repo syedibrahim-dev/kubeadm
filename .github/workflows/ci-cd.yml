@@ -239,7 +239,7 @@ jobs:
         with:
           name: zap-reports
           path: |
-            zap-report.json
+            report_json.json
             zap_scan_report.html
 
       - name: Stop target container
@@ -358,12 +358,12 @@ jobs:
             -F "test_title=Trivy K8s Config - ${{ github.sha }}" || true
 
       - name: Upload ZAP DAST report
-        if: hashFiles('reports/zap-report.json') != ''
+        if: hashFiles('reports/report_json.json') != ''
         run: |
           curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
             -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
             -F "scan_type=ZAP Scan" \
-            -F "file=@reports/zap-report.json" \
+            -F "file=@reports/report_json.json" \
             -F "product_name=k8s-app" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
