@@ -1,0 +1,123 @@
+# Outputs for Private Kubernetes Cluster - Admin Instance Access
+
+# Admin Instance Information
+output "admin_instance_id" {
+  description = "Admin instance ID for SSM access"
+  value       = module.admin.admin_instance_id
+}
+
+output "admin_private_ip" {
+  description = "Admin instance private IP"
+  value       = module.admin.admin_private_ip
+}
+
+# Primary Access Command
+output "admin_access_command" {
+  description = "AWS SSM command to access Admin kubectl management instance"
+  value       = "aws ssm start-session --target ${module.admin.admin_instance_id} --region ${var.aws_region}"
+}
+
+# Private IPs of K8s Nodes
+output "control_plane_private_ip" {
+  description = "Private IP of the control plane"
+  value       = module.compute.control_plane_private_ip
+}
+
+output "control_plane_id" {
+  description = "Control plane instance ID for emergency SSM access"
+  value       = module.compute.control_plane_id
+}
+
+output "worker_private_ips" {
+  description = "Private IPs of worker nodes"
+  value       = module.compute.worker_private_ip
+}
+
+output "worker_ids" {
+  description = "Worker instance IDs for emergency SSM access"
+  value       = module.compute.worker_id
+}
+
+output "worker_count" {
+  description = "Number of worker nodes"
+  value       = module.compute.worker_count
+}
+
+output "setup_instructions" {
+  description = "Quick setup instructions"
+  value = (var.enable_auto_setup ? <<-EOT
+
+    ═══════════════════════════════════════════════════════════
+    CLUSTER INFORMATION
+    ═══════════════════════════════════════════════════════════
+
+    Admin Instance ID: ${module.admin.admin_instance_id}
+    Admin Instance IP: ${module.admin.admin_private_ip}
+    
+    Control Plane ID: ${module.compute.control_plane_id}
+    Control Plane IP: ${module.compute.control_plane_private_ip}
+    
+    Worker Count: ${module.compute.worker_count}
+    Worker IPs: ${join(", ", module.compute.worker_private_ip)}
+
+    ═══════════════════════════════════════════════════════════
+    PRIMARY ACCESS - ADMIN INSTANCE (kubectl pre-configured)
+    ═══════════════════════════════════════════════════════════
+
+    Prerequisites:
+    - AWS CLI installed locally
+    - Session Manager plugin: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+    - Proper IAM permissions for SSM
+
+    Connect to Admin Instance:
+      ${format("aws ssm start-session --target %s --region %s", module.admin.admin_instance_id, var.aws_region)}
+
+    Run kubectl commands (kubeconfig already configured):
+      
+      Switch to ubuntu user (recommended):
+        sudo su - ubuntu
+        kubectl get nodes
+        kubectl get pods -A
+        kubectl create deployment nginx --image=nginx
+      
+      Or use sudo directly:
+        sudo kubectl get nodes
+        sudo kubectl get pods -A
+
+    Monitor admin setup logs:
+      sudo tail -f /var/log/admin-setup.log
+
+    ═══════════════════════════════════════════════════════════
+    DEPLOY YOUR APPLICATION
+    ═══════════════════════════════════════════════════════════
+
+    Step 1 — Upload k8s-app to S3 (run on your LOCAL machine):
+      bash upload-app.sh
+
+    Step 2 — If admin instance is already running, re-sync on it:
+      sudo su - ubuntu
+      aws s3 sync s3://${module.s3.bucket_name}/k8s-app/ ~/k8s-app/ --region ${var.aws_region} --delete
+      chmod +x ~/k8s-app/deploy.sh
+
+    Step 3 — Deploy the stack:
+      cd ~/k8s-app && bash deploy.sh
+
+    ═══════════════════════════════════════════════════════════
+    EMERGENCY DIRECT ACCESS TO NODES (via SSM)
+    ═══════════════════════════════════════════════════════════
+
+    Access Control Plane (for troubleshooting):
+      ${format("aws ssm start-session --target %s --region %s", module.compute.control_plane_id, var.aws_region)}
+
+    Monitor control plane setup logs:
+      sudo tail -f /var/log/k8s-setup.log
+
+    Access Worker Nodes (for troubleshooting):
+      ${join("\n      ", [for id in module.compute.worker_id : format("aws ssm start-session --target %s --region %s", id, var.aws_region)])}
+
+  EOT
+    : <<-EOT
+  EOT
+  )
+}
+

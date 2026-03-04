@@ -1,0 +1,35 @@
+# Terraform files
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Sensitive files
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# SSH keys (if accidentally placed in directory)
+*.pem
+*.key
+id_rsa*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Note: config/terraform.tfvars is intentionally NOT ignored
+# as it contains the configuration template for this project

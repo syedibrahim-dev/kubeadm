@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nodejs-app
+  namespace: test-app
+  labels:
+    app: nodejs-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nodejs-app
+  template:
+    metadata:
+      labels:
+        app: nodejs-app
+    spec:
+      containers:
+      - name: nodejs-app
+        image: node:18-alpine
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: PORT
+          value: "3000"
+        - name: MONGO_URL
+          value: "mongodb://mongodb:27017/testdb"
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            apk add --no-cache curl
+            cat > /app/package.json << 'EOF'
+            {
+              "name": "k8s-test-app",
+              "version": "1.0.0",
+              "dependencies": {
+                "express": "^4.18.2",
+                "mongoose": "^8.0.0",
+                "body-parser": "^1.20.2"
+              }
+            }
+            EOF
+            cat > /app/server.js << 'EOF'
+            const express = require('express');
+            const mongoose = require('mongoose');
+            const bodyParser = require('body-parser');
+
+            const app = express();
+            const PORT = process.env.PORT || 3000;
+            const MONGO_URL = process.env.MONGO_URL || 'mongodb://mongodb:27017/testdb';
+
+            app.use(bodyParser.json());
+            app.use(bodyParser.urlencoded({ extended: true }));
+
+            mongoose.connect(MONGO_URL, {
+              useNewUrlParser: true,
+              useUnifiedTopology: true
+            })
+            .then(() => console.log('✅ MongoDB connected successfully'))
+            .catch(err => console.error('❌ MongoDB connection error:', err));
+
+            const ItemSchema = new mongoose.Schema({
+              name: { type: String, required: true },
+              description: String,
+              createdAt: { type: Date, default: Date.now }
+            });
+
+            const Item = mongoose.model('Item', ItemSchema);
+
+            app.get('/', (req, res) => {
+              res.json({ 
+                message: '🚀 Welcome to K8s Test App!',
+                pod: process.env.HOSTNAME,
+                endpoints: {
+                  'GET /': 'This message',
+                  'GET /health': 'Health check',
+                  'GET /items': 'Get all items',
+                  'POST /items': 'Create item (body: {name, description})',
+                  'DELETE /items/:id': 'Delete item'
+                }
+              });
+            });
+
+            app.get('/health', (req, res) => {
+              const status = mongoose.connection.readyState === 1 ? 'healthy' : 'unhealthy';
+              res.json({ 
+                status,
+                pod: process.env.HOSTNAME,
+                database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+                timestamp: new Date().toISOString()
+              });
+            });
+
+            app.get('/items', async (req, res) => {
+              try {
+                const items = await Item.find().sort({ createdAt: -1 });
+                res.json({ pod: process.env.HOSTNAME, count: items.length, items });
+              } catch (err) {
+                res.status(500).json({ error: err.message });
+              }
+            });
+
+            app.post('/items', async (req, res) => {
+              try {
+                const { name, description } = req.body;
+                const item = new Item({ name, description });
+                await item.save();
+                res.status(201).json({ message: 'Item created', pod: process.env.HOSTNAME, item });
+              } catch (err) {
+                res.status(400).json({ error: err.message });
+              }
+            });
+
+            app.delete('/items/:id', async (req, res) => {
+              try {
+                const item = await Item.findByIdAndDelete(req.params.id);
+                if (!item) {
+                  return res.status(404).json({ error: 'Item not found' });
+                }
+                res.json({ message: 'Item deleted', pod: process.env.HOSTNAME, item });
+              } catch (err) {
+                res.status(400).json({ error: err.message });
+              }
+            });
+
+            app.listen(PORT, '0.0.0.0', () => {
+              console.log('🚀 Server running on port ' + PORT);
+              console.log('📊 MongoDB URL: ' + MONGO_URL);
+            });
+            EOF
+            cd /app
+            npm install
+            npm start
+        workingDir: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodejs-app
+  namespace: test-app
+  labels:
+    app: nodejs-app
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  selector:
+    app: nodejs-app
