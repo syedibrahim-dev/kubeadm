@@ -290,6 +290,7 @@ jobs:
             -F "scan_type=Hadolint Dockerfile check" \
             -F "file=@reports/hadolint-backend.json" \
             -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
             -F "close_old_findings=True" \
@@ -303,6 +304,7 @@ jobs:
             -F "scan_type=Hadolint Dockerfile check" \
             -F "file=@reports/hadolint-frontend.json" \
             -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
             -F "close_old_findings=True" \
@@ -316,6 +318,7 @@ jobs:
             -F "scan_type=Trivy Scan" \
             -F "file=@reports/trivy-backend.json" \
             -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
             -F "close_old_findings=True" \
@@ -329,6 +332,7 @@ jobs:
             -F "scan_type=Trivy Scan" \
             -F "file=@reports/trivy-frontend.json" \
             -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
             -F "close_old_findings=True" \
@@ -342,6 +346,7 @@ jobs:
             -F "scan_type=ZAP Scan" \
             -F "file=@reports/zap-report.json" \
             -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
             -F "engagement_name=CI/CD Pipeline" \
             -F "auto_create_context=True" \
             -F "close_old_findings=True" \
