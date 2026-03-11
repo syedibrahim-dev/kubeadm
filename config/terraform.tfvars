@@ -12,11 +12,12 @@ vpc = {
 # Compute Configuration
 compute = {
   control_plane_instance_type = "t3.small"  
-  worker_instance_type        = "t3.small"  
+  worker_instance_type        = "t3.medium"  
   worker_count                = 1
   control_plane_private_ip    = "10.0.10.100"
   control_plane_name          = "K8s-Control-Plane"
   worker_name                 = "K8s-Worker"
+  volume_size                 = 20
 }
 
 # Admin Instance Configuration

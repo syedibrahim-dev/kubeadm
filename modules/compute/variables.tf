@@ -57,6 +57,12 @@ variable "aws_region" {
   type        = string
 }
 
+variable "volume_size" {
+  description = "Root EBS volume size in GB for K8s nodes"
+  type        = number
+  default     = 20
+}
+
 variable "nat_gateway_id" {
   description = "NAT Gateway ID for explicit dependency - ensures NAT is ready before instances start"
   type        = string
