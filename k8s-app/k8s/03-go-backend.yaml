@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: go-backend
-        image: ibrahimalish/go-backend:latest
+        image: ibrahimalish/go-backend:c340d10b76a0a9f9cc82fece29fa3a771fbf5be0
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
