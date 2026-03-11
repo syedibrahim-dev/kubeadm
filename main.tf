@@ -28,6 +28,7 @@ module "compute" {
   control_plane_private_ip    = var.compute.control_plane_private_ip
   control_plane_name          = var.compute.control_plane_name
   worker_name                 = var.compute.worker_name
+  volume_size                 = var.compute.volume_size
   enable_auto_setup           = var.enable_auto_setup
   aws_region                  = var.aws_region
   nat_gateway_id              = module.vpc.nat_gateway_id

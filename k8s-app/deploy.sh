@@ -1,5 +1,6 @@
 #!/bin/bash
 # Deploy script for React (nginx:alpine) + Go (distroless) + MongoDB on K8s
+# Includes Argo CD for GitOps-based continuous deployment
 
 set -e
 
@@ -16,6 +17,20 @@ kubectl wait --namespace ingress-nginx \
   --selector=app.kubernetes.io/component=controller \
   --timeout=120s || true
 
+# ── Argo CD ───────────────────────────────────────────────────────────────────
+echo "📦 Installing Argo CD..."
+kubectl create namespace argocd 2>/dev/null || true
+kubectl apply -n argocd \
+  --server-side \
+  --force-conflicts \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+echo "⏳ Waiting for Argo CD server..."
+kubectl wait --namespace argocd \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/name=argocd-server \
+  --timeout=180s || true
+
 # ── Application manifests ──────────────────────────────────────────────────────
 echo " Deploying application manifests..."
 kubectl apply -f k8s/01-namespace.yaml
@@ -23,6 +38,10 @@ kubectl apply -f k8s/02-mongodb-hostpath.yaml
 kubectl apply -f k8s/03-go-backend.yaml
 kubectl apply -f k8s/04-react-frontend.yaml
 kubectl apply -f k8s/04-ingress.yaml
+
+# ── Argo CD Application (GitOps sync) ─────────────────────────────────────────
+echo " Registering Argo CD Application..."
+kubectl apply -f argocd/argocd-app.yaml
 
 # ── Wait for rollouts ──────────────────────────────────────────────────────────
 echo " Waiting for MongoDB..."
@@ -77,3 +96,16 @@ echo ""
 echo "🧪 Test the API:"
 echo "   curl http://localhost:8080/health"
 echo "   curl http://localhost:8080/items"
+echo ""
+echo "🔄 Argo CD (GitOps continuous deployment):"
+echo "   Argo CD is now watching the GitHub repo for manifest changes."
+echo "   When the CI/CD pipeline updates image tags and commits, Argo CD"
+echo "   will automatically sync the cluster (rolling update, zero downtime)."
+echo ""
+echo "   Access the Argo CD dashboard:"
+echo "   kubectl port-forward svc/argocd-server -n argocd 8443:443"
+echo ""
+echo "   Get the initial admin password:"
+echo "   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+echo ""
+echo "   Login: admin / <password from above>"

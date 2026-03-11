@@ -31,6 +31,7 @@ variable "compute" {
     control_plane_private_ip    = string
     control_plane_name          = string
     worker_name                 = string
+    volume_size                 = number
   })
   default = {
     control_plane_instance_type = "t3.medium"
@@ -39,6 +40,7 @@ variable "compute" {
     control_plane_private_ip    = "10.0.10.100"
     control_plane_name          = "K8s-Control-Plane"
     worker_name                 = "K8s-Worker"
+    volume_size                 = 20
   }
 }
 

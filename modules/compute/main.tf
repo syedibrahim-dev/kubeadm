@@ -123,6 +123,11 @@ resource "aws_instance" "control_plane" {
   # CRITICAL for Calico CNI to work!
   source_dest_check = false
 
+  root_block_device {
+    volume_size = var.volume_size
+    volume_type = "gp3"
+  }
+
   # Automatic Kubernetes setup
   user_data = var.enable_auto_setup ? templatefile("${path.root}/scripts/control-plane-setup.sh", {
     control_plane_ip   = var.control_plane_private_ip
@@ -148,6 +153,11 @@ resource "aws_instance" "worker" {
 
   # CRITICAL for Calico CNI to work!
   source_dest_check = false
+
+  root_block_device {
+    volume_size = var.volume_size
+    volume_type = "gp3"
+  }
 
   # Automatic Kubernetes setup
   user_data = var.enable_auto_setup ? templatefile("${path.root}/scripts/worker-setup.sh", {
