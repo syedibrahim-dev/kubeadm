@@ -22,7 +22,7 @@ spec:
       containers:
       - name: go-backend
         image: ibrahimalish/go-backend:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
           name: http

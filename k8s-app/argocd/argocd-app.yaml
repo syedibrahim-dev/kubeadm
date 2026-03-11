@@ -1,0 +1,25 @@
+# =============================================================================
+# Argo CD Application — GitOps continuous deployment
+# Watches k8s-app/k8s/ in the main branch. When the pipeline updates an image
+# tag and commits, Argo CD auto-syncs the cluster (rolling update).
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/syedibrahim-dev/kubeadm.git
+    targetRevision: main
+    path: k8s-app/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test-app
+  syncPolicy:
+    automated:
+      prune: true            # delete resources removed from git
+      selfHeal: true         # revert manual kubectl edits back to git state
+    syncOptions:
+      - CreateNamespace=true
