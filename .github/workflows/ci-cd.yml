@@ -225,7 +225,7 @@ jobs:
         run: |
           docker run -d --name frontend-target \
             --add-host=go-backend:127.0.0.1 \
-            -p 8080:80 \
+            -p 8080:8080 \
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8080/ > /dev/null 2>&1; then
