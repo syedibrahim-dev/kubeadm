@@ -378,6 +378,8 @@ jobs:
   deploy:
     name: "Step 8 \u2014 Deploy (GitOps)"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: [docker-push]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
