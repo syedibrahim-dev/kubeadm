@@ -24,12 +24,12 @@ spec:
         image: ibrahimalish/node-frontend:76a918a0ea0435d96514efcee6ffbf65e4ada367
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 80
+        - containerPort: 8080
           name: http
         readinessProbe:
           httpGet:
             path: /
-            port: 80
+            port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
         resources:
@@ -50,6 +50,6 @@ spec:
     app: react-frontend
   ports:
   - port:       80
-    targetPort: 80
+    targetPort: 8080
     name:       http
   type: ClusterIP
