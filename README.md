@@ -556,7 +556,7 @@ Each pipeline run creates individual test entries:
 - `Hadolint Frontend - <commit SHA>`
 - `Trivy Backend Image - <commit SHA>`
 - `Trivy Frontend Image - <commit SHA>`
-- `OWASP ZAP DAST - <commit SHA>`
+- `OWASP ZAP DAS - <commit SHA>`
 
 SonarQube analysis results remain available in SonarQube/SonarCloud rather than appearing as DefectDojo test entries.
 
