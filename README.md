@@ -10,7 +10,7 @@ This Terraform project deploys a **fully automated, zero-trust Kubernetes cluste
 - **Dedicated Admin instance** - centralized kubectl gateway with pre-configured access
 - **Network-enforced security** - Control plane API only accessible from Admin instance via security groups
 - **Automated worker join** - workers join cluster automatically via SSM Parameter Store
-- **CI/CD pipeline** - GitHub Actions with Hadolint, Trivy, Semgrep (SAST), OWASP ZAP (DAST)
+- **CI/CD pipeline** - GitHub Actions with SonarQube, Hadolint, Trivy, OWASP ZAP, DefectDojo, and GitOps deployment
 - **DefectDojo integration** - centralized security findings dashboard
 
 ## Architecture Design
@@ -95,7 +95,7 @@ This Terraform project deploys a **fully automated, zero-trust Kubernetes cluste
 │   └── terraform.tfvars        # Configuration values
 ├── .github/
 │   └── workflows/
-│       └── ci-cd.yml            # CI/CD pipeline (Hadolint + Semgrep + Trivy + ZAP + DefectDojo)
+│       └── ci-cd.yml            # CI/CD pipeline (SonarQube + Hadolint + Trivy + ZAP + DefectDojo + GitOps)
 ├── defectdojo/
 │   └── docker-compose.yml      # Self-hosted DefectDojo (security findings dashboard)
 └── README.md                    # This file
@@ -430,18 +430,86 @@ Outbound: ALL
 
 ## CI/CD Pipeline
 
-The project includes a **GitHub Actions pipeline** (`.github/workflows/ci-cd.yml`) that runs on every push to `main` and on pull requests.
+The project includes a **GitHub Actions pipeline** (`.github/workflows/ci-cd.yml`) that validates pull requests and, on pushes to `main`, publishes images and deploys through GitOps.
+
+### CI/CD Architecture Diagram
+
+The diagram below shows the main systems, integrations, artifacts, and deployment targets. The step-by-step job order is described in the pipeline flow section that follows.
+
+```mermaid
+flowchart TB
+   dev[Developer]
+   repo[(GitHub Repository)]
+
+   subgraph gh[GitHub]
+      actions[GitHub Actions Workflow]
+      artifacts[(Workflow Artifacts)]
+   end
+
+   subgraph ci[CI Runner]
+      checkout[Source Checkout]
+      sonarscan[SonarQube Scan]
+      hadolint[Hadolint]
+      build[Docker Build]
+      trivy[Trivy Scan]
+      zap[OWASP ZAP]
+   end
+
+   subgraph sec[Security Platforms]
+      sonar[(SonarQube or SonarCloud)]
+      dojo[(DefectDojo)]
+   end
+
+   subgraph delivery[Delivery and Runtime]
+      hub[(Docker Hub)]
+      gitops[Manifest Update Commit]
+      argo[Argo CD]
+      cluster[(Kubernetes Cluster)]
+   end
+
+   dev -->|push or pull request| repo
+   repo --> actions
+   actions --> checkout
+   checkout --> sonarscan
+   checkout --> hadolint
+   checkout --> build
+
+   sonarscan -->|SAST results| sonar
+   hadolint -->|lint reports| artifacts
+   build -->|backend and frontend images| artifacts
+   artifacts --> trivy
+   artifacts --> zap
+   trivy -->|vulnerability reports| artifacts
+   zap -->|DAST reports| artifacts
+   artifacts -->|Hadolint, Trivy, ZAP reports| dojo
+
+   build -->|main branch only| hub
+   actions -->|update image tags on main| gitops
+   gitops --> repo
+   repo -->|watched by| argo
+   hub -->|image pull| cluster
+   argo -->|sync manifests| cluster
+```
+
+### Pipeline Flow
+
+- Pull requests run source analysis, Dockerfile linting, image builds, and Trivy vulnerability scanning.
+- Pushes to `main` additionally publish SHA-tagged images to Docker Hub, run OWASP ZAP against the frontend container, upload supported scan reports to DefectDojo, and update Kubernetes manifests for Argo CD.
 
 ### Pipeline Jobs
 
-| Job | Tool | Type | What it does |
-|-----|------|------|-------------|
-| 1 | **Hadolint** | Dockerfile Lint | Checks both Dockerfiles for bad practices (missing USER, unpinned tags, etc.) |
-| 2 | **Semgrep** | SAST | Scans Go + React source code for vulnerabilities, secrets, and anti-patterns |
-| 3 | **Docker Build** | Build & Push | Builds multi-stage images, pushes to Docker Hub on merge to `main` |
-| 4 | **Trivy** | Image + Config Scan | Scans container images for CVEs and K8s manifests for misconfigurations |
-| 5 | **OWASP ZAP** | DAST | Spins up the frontend container and runs a live baseline scan against it |
-| 6 | **DefectDojo** | Upload | Pushes all scan reports to DefectDojo for centralized viewing |
+| Step | Job | Tool | What it does |
+|------|-----|------|--------------|
+| 1 | **SonarQube SAST** | SonarQube | Scans Go + React source code for bugs, vulnerabilities, and code smells |
+| 2 | **Hadolint Dockerfile Lint** | Hadolint | Lints the backend and frontend Dockerfiles and stores JSON reports as artifacts |
+| 3 | **Docker Build** | Docker | Builds backend and frontend images and saves them as tar artifacts for downstream jobs |
+| 4 | **Trivy Vulnerability Scan** | Trivy | Loads the built images and scans them for `CRITICAL`, `HIGH`, and `MEDIUM` vulnerabilities |
+| 5 | **Docker Push** | Docker Hub | On pushes to `main`, publishes backend and frontend images with both the commit SHA and `latest` tags |
+| 6 | **OWASP ZAP DAST** | OWASP ZAP | On pushes to `main`, runs a live baseline scan against the frontend container |
+| 7 | **Upload to DefectDojo** | DefectDojo API | Imports available Hadolint, Trivy, and ZAP reports into the central findings dashboard |
+| 8 | **Deploy (GitOps)** | Git + Argo CD | Commits SHA-pinned image tags to the manifests so Argo CD can sync the cluster |
+
+**Note:** SonarQube findings stay in SonarQube/SonarCloud. The current workflow imports Hadolint, Trivy, and ZAP reports into DefectDojo.
 
 ### Required GitHub Secrets
 
@@ -449,6 +517,8 @@ Go to **Settings → Secrets and variables → Actions** in your GitHub repo:
 
 | Secret | Description |
 |--------|-------------|
+| `SONAR_TOKEN` | SonarQube or SonarCloud authentication token |
+| `SONAR_HOST_URL` | SonarQube base URL (for example `https://sonarcloud.io`) |
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | Docker Hub access token ([create one here](https://hub.docker.com/settings/security)) |
 | `DEFECTDOJO_URL` | DefectDojo base URL (e.g. `http://your-server:8080`) |
@@ -484,12 +554,11 @@ All scan results are uploaded under:
 Each pipeline run creates individual test entries:
 - `Hadolint Backend - <commit SHA>`
 - `Hadolint Frontend - <commit SHA>`
-- `Semgrep Backend SAST - <commit SHA>`
-- `Semgrep Frontend SAST - <commit SHA>`
 - `Trivy Backend Image - <commit SHA>`
 - `Trivy Frontend Image - <commit SHA>`
-- `Trivy K8s Config - <commit SHA>`
-- `OWASP ZAP DAST - <commit SHA>`
+- `OWASP ZAP DAS - <commit SHA>`
+
+SonarQube analysis results remain available in SonarQube/SonarCloud rather than appearing as DefectDojo test entries.
 
 ### Stop DefectDojo
 
