@@ -1,0 +1,410 @@
+# ==============================================================================
+# CI/CD Pipeline — Security Scans + Build + Push + Deploy (GitOps)
+#
+# Sequence:
+#   Step 1: SonarQube  — SAST (source code static analysis)
+#   Step 2: Hadolint   — Dockerfile linting
+#   Step 3: Docker Build — build images, save as artifacts
+#   Step 4: Trivy      — container image vulnerability scan
+#   Step 5: Docker Push — push SHA-tagged + latest images to Docker Hub
+#   Step 6: OWASP ZAP  — DAST (live frontend container scan)
+#   Step 7: DefectDojo — upload all reports to dashboard
+#   Step 8: Deploy     — update image tags in k8s manifests → Argo CD auto-syncs
+#
+# Required GitHub Secrets:
+#   SONAR_TOKEN         — SonarQube/SonarCloud authentication token
+#   SONAR_HOST_URL      — SonarQube URL (e.g. https://sonarcloud.io or ngrok URL)
+#   DOCKERHUB_USERNAME  — Docker Hub username
+#   DOCKERHUB_TOKEN     — Docker Hub access token
+#   DEFECTDOJO_URL      — DefectDojo base URL
+#   DEFECTDOJO_API_KEY  — DefectDojo API v2 key
+# ==============================================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/go-backend
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/node-frontend
+
+jobs:
+  # ============================================================================
+  # STEP 1: SonarQube — SAST (Static Application Security Testing)
+  # Scans Go + React source code for bugs, vulnerabilities, and code smells.
+  # ============================================================================
+  sonarqube:
+    name: "Step 1 \u2014 SonarQube SAST"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so SonarQube can blame/diff correctly
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  # ============================================================================
+  # STEP 2: Hadolint — Dockerfile Linting
+  # Catches bad practices: missing USER, latest tags, unversioned packages, etc.
+  # ============================================================================
+  hadolint:
+    name: "Step 2 \u2014 Hadolint Dockerfile Lint"
+    runs-on: ubuntu-latest
+    needs: [sonarqube]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lint backend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: k8s-app/backend/Dockerfile
+          format: json
+          output-file: hadolint-backend.json
+          no-fail: true
+
+      - name: Lint frontend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: k8s-app/frontend/Dockerfile
+          format: json
+          output-file: hadolint-frontend.json
+          no-fail: true
+
+      - name: Upload Hadolint reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: hadolint-reports
+          path: hadolint-*.json
+
+  # ============================================================================
+  # STEP 3: Docker Build
+  # Builds both images and saves them as tar artifacts for downstream jobs.
+  # ============================================================================
+  docker-build:
+    name: "Step 3 \u2014 Docker Build"
+    runs-on: ubuntu-latest
+    needs: [hadolint]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t ${{ env.BACKEND_IMAGE }}:${{ github.sha }} k8s-app/backend/
+
+      - name: Build frontend image
+        run: docker build -t ${{ env.FRONTEND_IMAGE }}:${{ github.sha }} k8s-app/frontend/
+
+      - name: Save images as tar archives
+        run: |
+          docker save ${{ env.BACKEND_IMAGE }}:${{ github.sha }} | gzip > backend-image.tar.gz
+          docker save ${{ env.FRONTEND_IMAGE }}:${{ github.sha }} | gzip > frontend-image.tar.gz
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images
+          path: "*-image.tar.gz"
+          retention-days: 1
+
+  # ============================================================================
+  # STEP 4: Trivy — Container Image Vulnerability Scanning
+  # Loads the built images and scans for CVEs and exposed secrets.
+  # ============================================================================
+  trivy-scan:
+    name: "Step 4 \u2014 Trivy Vulnerability Scan"
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    steps:
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+
+      - name: Load images
+        run: |
+          docker load < backend-image.tar.gz
+          docker load < frontend-image.tar.gz
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+          trivy --version
+
+      - name: Trivy scan — Go backend
+        run: |
+          trivy image --format json --output trivy-backend.json \
+            --severity CRITICAL,HIGH,MEDIUM \
+            --exit-code 0 \
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+      - name: Trivy scan — React frontend
+        run: |
+          trivy image --format json --output trivy-frontend.json \
+            --severity CRITICAL,HIGH,MEDIUM \
+            --exit-code 0 \
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+      - name: Upload Trivy reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: trivy-*.json
+
+  # ============================================================================
+  # STEP 5: Docker Push
+  # After Trivy passes, push the verified images to Docker Hub.
+  # Only runs on push to main (not on pull requests).
+  # ============================================================================
+  docker-push:
+    name: "Step 5 \u2014 Docker Push"
+    runs-on: ubuntu-latest
+    needs: [trivy-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+
+      - name: Load images
+        run: |
+          docker load < backend-image.tar.gz
+          docker load < frontend-image.tar.gz
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push backend
+        run: |
+          docker tag ${{ env.BACKEND_IMAGE }}:${{ github.sha }} ${{ env.BACKEND_IMAGE }}:latest
+          docker push ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.BACKEND_IMAGE }}:latest
+
+      - name: Tag and push frontend
+        run: |
+          docker tag ${{ env.FRONTEND_IMAGE }}:${{ github.sha }} ${{ env.FRONTEND_IMAGE }}:latest
+          docker push ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.FRONTEND_IMAGE }}:latest
+
+  # ============================================================================
+  # STEP 6: OWASP ZAP — DAST (Dynamic Application Security Testing)
+  # Loads the frontend image, spins it up, and runs a ZAP baseline scan.
+  # Runs after push on main; on PRs runs after trivy (push is skipped).
+  # ============================================================================
+  zap-dast:
+    name: "Step 6 \u2014 OWASP ZAP DAST Scan"
+    runs-on: ubuntu-latest
+    needs: [docker-push]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+
+      - name: Load frontend image
+        run: docker load < frontend-image.tar.gz
+
+      - name: Run frontend container
+        run: |
+          docker run -d --name frontend-target \
+            --add-host=go-backend:127.0.0.1 \
+            -p 8080:8080 \
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/ > /dev/null 2>&1; then
+              echo "Frontend ready after ${i}s"; break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Timed out. Container logs:"; docker logs frontend-target; exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run OWASP ZAP baseline scan
+        run: |
+          chmod 777 ${{ github.workspace }}
+          docker run --rm --network host \
+            -v ${{ github.workspace }}:/zap/wrk/:rw \
+            -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:8080/ \
+            -J zap-report.json \
+            -r zap-report.html \
+            -I
+          echo "--- ZAP reports ---"
+          ls -la ${{ github.workspace }}/zap-report* || echo "No ZAP reports found"
+
+      - name: Upload ZAP reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-reports
+          path: |
+            zap-report.json
+            zap-report.html
+
+      - name: Stop frontend container
+        if: always()
+        run: docker rm -f frontend-target || true
+
+  # ============================================================================
+  # STEP 7: Upload all scan results to DefectDojo
+  # Aggregates every report into a single DefectDojo product for visualization.
+  # ============================================================================
+  defectdojo-upload:
+    name: "Step 7 \u2014 Upload to DefectDojo"
+    runs-on: ubuntu-latest
+    needs: [sonarqube, hadolint, trivy-scan, zap-dast]
+    if: always()
+    steps:
+      - name: Download all scan artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          merge-multiple: true
+          path: reports/
+
+      - name: List collected reports
+        run: ls -la reports/ || echo 'No reports directory found'
+
+      - name: Upload Hadolint — backend
+        if: hashFiles('reports/hadolint-backend.json') != ''
+        run: |
+          curl -s -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+            -F "scan_type=Hadolint Dockerfile check" \
+            -F "file=@reports/hadolint-backend.json" \
+            -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
+            -F "engagement_name=CI/CD Pipeline" \
+            -F "auto_create_context=True" \
+            -F "close_old_findings=True" \
+            -F "test_title=Hadolint Backend - ${{ github.sha }}" || true
+
+      - name: Upload Hadolint — frontend
+        if: hashFiles('reports/hadolint-frontend.json') != ''
+        run: |
+          curl -s -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+            -F "scan_type=Hadolint Dockerfile check" \
+            -F "file=@reports/hadolint-frontend.json" \
+            -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
+            -F "engagement_name=CI/CD Pipeline" \
+            -F "auto_create_context=True" \
+            -F "close_old_findings=True" \
+            -F "test_title=Hadolint Frontend - ${{ github.sha }}" || true
+
+      - name: Upload Trivy — backend image
+        if: hashFiles('reports/trivy-backend.json') != ''
+        run: |
+          curl -s -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+            -F "scan_type=Trivy Scan" \
+            -F "file=@reports/trivy-backend.json" \
+            -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
+            -F "engagement_name=CI/CD Pipeline" \
+            -F "auto_create_context=True" \
+            -F "close_old_findings=True" \
+            -F "test_title=Trivy Backend Image - ${{ github.sha }}" || true
+
+      - name: Upload Trivy — frontend image
+        if: hashFiles('reports/trivy-frontend.json') != ''
+        run: |
+          curl -s -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+            -F "scan_type=Trivy Scan" \
+            -F "file=@reports/trivy-frontend.json" \
+            -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
+            -F "engagement_name=CI/CD Pipeline" \
+            -F "auto_create_context=True" \
+            -F "close_old_findings=True" \
+            -F "test_title=Trivy Frontend Image - ${{ github.sha }}" || true
+
+      - name: Upload ZAP DAST report
+        if: hashFiles('reports/zap-report.json') != ''
+        run: |
+          curl -s -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
+            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
+            -F "scan_type=ZAP Scan" \
+            -F "file=@reports/zap-report.json" \
+            -F "product_name=k8s-app" \
+            -F "product_type_name=Research and Development" \
+            -F "engagement_name=CI/CD Pipeline" \
+            -F "auto_create_context=True" \
+            -F "close_old_findings=True" \
+            -F "test_title=OWASP ZAP DAST - ${{ github.sha }}" || true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Tool | Type | Target |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 1 | SonarQube | SAST | Go backend + React frontend source |" >> $GITHUB_STEP_SUMMARY
+          echo "| 2 | Hadolint | Lint | backend + frontend Dockerfiles |" >> $GITHUB_STEP_SUMMARY
+          echo "| 3 | Docker | Build | Backend + frontend images |" >> $GITHUB_STEP_SUMMARY
+          echo "| 4 | Trivy | Image Scan | Backend + frontend container images |" >> $GITHUB_STEP_SUMMARY
+          echo "| 5 | Docker | Push | Docker Hub (main branch only) |" >> $GITHUB_STEP_SUMMARY
+          echo "| 6 | OWASP ZAP | DAST | Live frontend container |" >> $GITHUB_STEP_SUMMARY
+          echo "| 7 | DefectDojo | Upload | All reports |" >> $GITHUB_STEP_SUMMARY
+          echo "| 8 | GitOps | Deploy | Update manifests → Argo CD auto-syncs cluster |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # STEP 8: Deploy — Update image tags in k8s manifests (GitOps)
+  # Commits the SHA-pinned image tags back to the repo. Argo CD (running in the
+  # kubeadm cluster) detects the change and triggers a rolling update.
+  # No SSH keys or direct cluster access needed from CI.
+  # ============================================================================
+  deploy:
+    name: "Step 8 \u2014 Deploy (GitOps)"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [docker-push]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update image tags in manifests
+        run: |
+          sed -i "s|ibrahimalish/go-backend:.*|ibrahimalish/go-backend:${{ github.sha }}|" \
+            k8s-app/k8s/03-go-backend.yaml
+          sed -i "s|ibrahimalish/node-frontend:.*|ibrahimalish/node-frontend:${{ github.sha }}|" \
+            k8s-app/k8s/04-react-frontend.yaml
+
+          echo "Updated manifests:"
+          grep 'image:' k8s-app/k8s/03-go-backend.yaml
+          grep 'image:' k8s-app/k8s/04-react-frontend.yaml
+
+      - name: Commit and push updated manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s-app/k8s/03-go-backend.yaml k8s-app/k8s/04-react-frontend.yaml
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "deploy: update images to ${{ github.sha }}"
+          git push
+
