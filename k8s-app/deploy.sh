@@ -31,17 +31,21 @@ kubectl wait --namespace argocd \
   --selector=app.kubernetes.io/name=argocd-server \
   --timeout=180s || true
 
-# ── Application manifests ──────────────────────────────────────────────────────
-echo " Deploying application manifests..."
-kubectl apply -f k8s/01-namespace.yaml
-kubectl apply -f k8s/02-mongodb-hostpath.yaml
-kubectl apply -f k8s/03-go-backend.yaml
-kubectl apply -f k8s/04-react-frontend.yaml
-kubectl apply -f k8s/04-ingress.yaml
-
 # ── Argo CD Application (GitOps sync) ─────────────────────────────────────────
-echo " Registering Argo CD Application..."
+# ArgoCD will manage all application manifests from the gitops repository
+# No need to manually apply k8s/*.yaml - ArgoCD handles deployment automatically
+echo "📦 Registering Argo CD Application (GitOps)..."
 kubectl apply -f argocd/argocd-app.yaml
+
+echo "⏳ Waiting for ArgoCD to sync application..."
+echo "   ArgoCD is now pulling manifests from: https://github.com/syedibrahim-dev/kubeadm-gitops.git"
+echo "   Path: k8s-app/k8s/"
+sleep 10  # Give ArgoCD time to detect the application
+
+# Trigger initial sync (in case auto-sync takes time)
+kubectl patch application k8s-app -n argocd --type=merge \
+  -p '{"operation":{"initiatedBy":{"username":"deploy-script"},"sync":{"revision":"main"}}}' \
+  2>/dev/null || echo "   (ArgoCD will sync automatically)"
 
 # ── Wait for rollouts ──────────────────────────────────────────────────────────
 echo " Waiting for MongoDB..."
@@ -98,9 +102,15 @@ echo "   curl http://localhost:8080/health"
 echo "   curl http://localhost:8080/items"
 echo ""
 echo "🔄 Argo CD (GitOps continuous deployment):"
-echo "   Argo CD is now watching the GitHub repo for manifest changes."
-echo "   When the CI/CD pipeline updates image tags and commits, Argo CD"
-echo "   will automatically sync the cluster (rolling update, zero downtime)."
+echo "   ✅ ArgoCD is watching: https://github.com/syedibrahim-dev/kubeadm-gitops.git"
+echo "   📂 Path: k8s-app/k8s/"
+echo "   🔄 Auto-sync: enabled (prune + self-heal)"
+echo ""
+echo "   When the CI/CD pipeline updates image tags in the gitops repo,"
+echo "   ArgoCD will automatically sync the cluster (rolling update, zero downtime)."
+echo ""
+echo "   Check ArgoCD sync status:"
+echo "   kubectl get application k8s-app -n argocd"
 echo ""
 echo "   Access the Argo CD dashboard:"
 echo "   kubectl port-forward svc/argocd-server -n argocd 8443:443"
@@ -109,3 +119,6 @@ echo "   Get the initial admin password:"
 echo "   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
 echo ""
 echo "   Login: admin / <password from above>"
+echo ""
+echo "💡 Note: Application manifests are managed by ArgoCD from the gitops repo."
+echo "   Manual kubectl apply of k8s/*.yaml is not needed (ArgoCD handles it)."
