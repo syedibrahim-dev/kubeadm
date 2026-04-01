@@ -1,239 +1,205 @@
-# Kubernetes Test Application
+# Kubernetes Application (React + Go + MongoDB)
 
-A simple Node.js + MongoDB application for testing your Kubernetes cluster with Ingress.
+A full-stack application deployed via GitOps (ArgoCD) on a private Kubernetes cluster.
 
 ## Architecture
 
-- **Node.js App**: Express API with CRUD operations (2 replicas for load balancing)
-- **MongoDB**: Database for persistence (1 replica with PVC)
-- **Ingress**: NGINX Ingress Controller for routing
-- **Access**: Port-forwarding from admin instance to local PC/WSL
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        test-app namespace                        │
+│                                                                  │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
+│   │   React     │    │   Go        │    │  MongoDB    │        │
+│   │  Frontend   │───▶│  Backend    │───▶│  Database   │        │
+│   │  (nginx)    │    │ (distroless)│    │   + PVC     │        │
+│   └─────────────┘    └─────────────┘    └─────────────┘        │
+│         │                                                       │
+│         ▼                                                       │
+│   ┌─────────────────────────────────────┐                      │
+│   │      NGINX Ingress Controller       │                      │
+│   │  /      → react-frontend:80         │                      │
+│   │  /api/* → go-backend:8080           │                      │
+│   └─────────────────────────────────────┘                      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-## Deployment Steps
+## Deployment
 
-### 1. Connect to Admin Instance via SSM
+Deployment is handled by **ArgoCD** (GitOps). See the main [README](../README.md) for details.
 
-From your local PC/WSL:
+```bash
+# On Admin instance - run the deploy script
+./deploy.sh
+```
+
+---
+
+## Port Forwarding Commands
+
+Since the cluster is private (no public IPs), use port forwarding to access services.
+
+### Step 1: Connect to Admin Instance
 
 ```bash
 # Get admin instance ID
-aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=K8s-Admin" \
-  --query 'Reservations[0].Instances[0].InstanceId' \
-  --output text
+cd ~/kubeadm
+terraform output admin_instance_id
 
 # Connect via SSM
-aws ssm start-session --target <INSTANCE_ID>
+aws ssm start-session --target <ADMIN_INSTANCE_ID> --region us-east-1
+
+# Switch to ubuntu user
+sudo su - ubuntu
 ```
 
-### 2. Copy Kubernetes Manifests to Admin Instance
+### Step 2: kubectl Port Forwarding (on Admin Instance)
 
-On your **local PC/WSL**, copy the k8s manifests to the admin instance:
+#### ArgoCD Dashboard
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8443:443
+```
+
+#### Application via Ingress
+```bash
+kubectl port-forward svc/ingress-nginx-controller -n ingress-nginx 8080:80
+```
+
+#### Direct Service Access (bypass ingress)
+```bash
+# React Frontend
+kubectl port-forward svc/react-frontend -n test-app 3000:80
+
+# Go Backend
+kubectl port-forward svc/go-backend -n test-app 8081:8080
+
+# MongoDB
+kubectl port-forward svc/mongodb -n test-app 27017:27017
+```
+
+### Step 3: SSM Tunnel to Your Local Machine
+
+Open a **new terminal** on your local machine and create an SSM tunnel:
+
+#### ArgoCD (https://localhost:8443)
+```bash
+aws ssm start-session --target <ADMIN_INSTANCE_ID> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters 'portNumber=8443,localPortNumber=8443' \
+  --region us-east-1
+```
+
+#### Application (http://localhost:8080)
+```bash
+aws ssm start-session --target <ADMIN_INSTANCE_ID> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters 'portNumber=8080,localPortNumber=8080' \
+  --region us-east-1
+```
+
+#### React Frontend Direct (http://localhost:3000)
+```bash
+aws ssm start-session --target <ADMIN_INSTANCE_ID> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters 'portNumber=3000,localPortNumber=3000' \
+  --region us-east-1
+```
+
+#### Go Backend Direct (http://localhost:8081)
+```bash
+aws ssm start-session --target <ADMIN_INSTANCE_ID> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters 'portNumber=8081,localPortNumber=8081' \
+  --region us-east-1
+```
+
+---
+
+## Quick Reference
+
+| Service | kubectl port-forward | SSM tunnel | Access URL |
+|---------|---------------------|------------|------------|
+| **ArgoCD** | `svc/argocd-server -n argocd 8443:443` | `portNumber=8443,localPortNumber=8443` | https://localhost:8443 |
+| **App (Ingress)** | `svc/ingress-nginx-controller -n ingress-nginx 8080:80` | `portNumber=8080,localPortNumber=8080` | http://localhost:8080 |
+| **React Frontend** | `svc/react-frontend -n test-app 3000:80` | `portNumber=3000,localPortNumber=3000` | http://localhost:3000 |
+| **Go Backend** | `svc/go-backend -n test-app 8081:8080` | `portNumber=8081,localPortNumber=8081` | http://localhost:8081 |
+| **MongoDB** | `svc/mongodb -n test-app 27017:27017` | `portNumber=27017,localPortNumber=27017` | mongodb://localhost:27017 |
+
+---
+
+## ArgoCD Access
 
 ```bash
-# Create a tarball
-cd /home/ibrahim/kubeadm
-tar -czf k8s-app.tar.gz k8s-app/
+# Get initial admin password
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d && echo
 
-# Copy to S3 (temporary bucket method) or use SSM document
-aws s3 cp k8s-app.tar.gz s3://YOUR-BUCKET/
+# Login: admin / <password from above>
 ```
 
-On the **admin instance**:
+---
 
+## Testing the Application
+
+### Via Ingress
 ```bash
-# Download from S3
-aws s3 cp s3://YOUR-BUCKET/k8s-app.tar.gz ~/
-tar -xzf k8s-app.tar.gz
-cd k8s-app/k8s
+# Health check
+curl http://localhost:8080/api/health
+
+# List items
+curl http://localhost:8080/api/items
+
+# Create item
+curl -X POST http://localhost:8080/api/items \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test item"}'
 ```
 
-**Alternative**: Manually create the files on the admin instance using the YAML content.
-
-### 3. Install NGINX Ingress Controller
-
-On the **admin instance**:
-
+### Direct Backend
 ```bash
-# Install NGINX Ingress Controller
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/baremetal/deploy.yaml
-
-# Wait for ingress controller to be ready
-kubectl wait --namespace ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=120s
-
-# Check ingress controller status
-kubectl get pods -n ingress-nginx
-kubectl get svc -n ingress-nginx
+curl http://localhost:8081/health
+curl http://localhost:8081/items
 ```
 
-### 4. Deploy the Application
+---
 
-On the **admin instance**:
-
-```bash
-cd ~/k8s-app/k8s
-
-# Apply all manifests
-kubectl apply -f 01-namespace.yaml
-kubectl apply -f 02-mongodb.yaml
-kubectl apply -f 03-nodejs-app.yaml
-kubectl apply -f 04-ingress.yaml
-
-# Or apply all at once
-kubectl apply -f .
-
-# Watch deployment progress
-kubectl get pods -n test-app -w
-```
-
-### 5. Verify Deployment
+## Verify Deployment
 
 ```bash
 # Check all resources
 kubectl get all -n test-app
 
+# Check pods
+kubectl get pods -n test-app
+
 # Check ingress
 kubectl get ingress -n test-app
 
-# Check MongoDB logs
+# Check ArgoCD sync status
+kubectl get application k8s-app -n argocd
+
+# View logs
+kubectl logs -n test-app -l app=go-backend
+kubectl logs -n test-app -l app=react-frontend
 kubectl logs -n test-app -l app=mongodb
-
-# Check Node.js app logs
-kubectl logs -n test-app -l app=nodejs-app
 ```
 
-### 6. Port Forward to Local PC/WSL
+---
 
-#### Option 1: Port Forward the Service (Recommended for Testing)
-
-On the **admin instance**:
-
-```bash
-# Forward Node.js app service to admin instance
-kubectl port-forward -n test-app svc/nodejs-app 8080:80 --address=0.0.0.0
-```
-
-Then from your **local PC/WSL**, create an SSM session with port forwarding:
-
-```bash
-# Forward from admin instance to your local machine
-aws ssm start-session \
-  --target <INSTANCE_ID> \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
-```
-
-Now access the app at: **http://localhost:8080**
-
-#### Option 2: Port Forward the Ingress Controller
-
-On the **admin instance**:
-
-```bash
-# Get ingress controller service name
-kubectl get svc -n ingress-nginx
-
-# Forward ingress controller
-kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8080:80 --address=0.0.0.0
-```
-
-Then from your **local PC/WSL**:
-
-```bash
-aws ssm start-session \
-  --target <INSTANCE_ID> \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
-```
-
-Access with host header: `curl -H "Host: test-app.local" http://localhost:8080`
-
-Or add to your local `/etc/hosts`:
-```
-127.0.0.1 test-app.local
-```
-
-Then visit: **http://test-app.local:8080**
-
-#### Option 3: Direct Pod Port Forward (Debugging)
-
-```bash
-# Get a pod name
-kubectl get pods -n test-app -l app=nodejs-app
-
-# Forward directly to pod
-kubectl port-forward -n test-app <POD_NAME> 8080:3000 --address=0.0.0.0
-```
-
-Then use SSM port forwarding as shown above.
-
-## Testing the Application
-
-### MongoDB Connection Issues
-
-```bash
-# Test MongoDB connectivity from app pod
-kubectl exec -n test-app -it <NODEJS_POD> -- sh
-apk add --no-cache mongodb-tools
-mongosh mongodb://mongodb:27017/testdb
-```
 ## Cleanup
 
 ```bash
-# Delete all app resources
+# Delete application (ArgoCD will remove all resources)
+kubectl delete application k8s-app -n argocd
+
+# Or delete namespace directly
 kubectl delete namespace test-app
 
 # Delete ingress controller (optional)
 kubectl delete namespace ingress-nginx
-```
 
-## Architecture Diagram
-
-```
-┌─────────────────┐
-│  Local PC/WSL   │
-│   localhost     │
-│    :8080        │
-└────────┬────────┘
-         │ SSM Port Forward
-         │
-┌────────▼────────┐
-│ Admin Instance  │
-│ kubectl port-   │
-│ forward :8080   │
-└────────┬────────┘
-         │ K8s Network
-         │
-┌────────▼────────────────────────┐
-│     Ingress Controller          │
-│  (ingress-nginx-controller)     │
-└────────┬────────────────────────┘
-         │
-┌────────▼────────────────────────┐
-│    Service: nodejs-app          │
-│         (ClusterIP)             │
-└─────┬──────────────┬────────────┘
-      │              │
-┌─────▼─────┐  ┌────▼──────┐
-│  Pod 1    │  │  Pod 2    │
-│ nodejs-app│  │nodejs-app │
-└─────┬─────┘  └────┬──────┘
-      │             │
-      └──────┬──────┘
-             │
-      ┌──────▼──────┐
-      │  Service:   │
-      │  mongodb    │
-      └──────┬──────┘
-             │
-      ┌──────▼──────┐
-      │  MongoDB    │
-      │   Pod       │
-      │   + PVC     │
-      └─────────────┘
+# Delete ArgoCD (optional)
+kubectl delete namespace argocd
 ```
 
 
