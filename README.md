@@ -10,7 +10,8 @@ This Terraform project deploys a **fully automated, zero-trust Kubernetes cluste
 - **Dedicated Admin instance** - centralized kubectl gateway with pre-configured access
 - **Network-enforced security** - Control plane API only accessible from Admin instance via security groups
 - **Automated worker join** - workers join cluster automatically via SSM Parameter Store
-- **CI/CD pipeline** - GitHub Actions with SonarQube, Hadolint, Trivy, OWASP ZAP, DefectDojo, and GitOps deployment
+- **CI/CD pipeline** - GitHub Actions with SonarQube, Hadolint, Trivy, OWASP ZAP, DefectDojo
+- **GitOps deployment** - ArgoCD with separate GitOps repository (industry best practice)
 - **DefectDojo integration** - centralized security findings dashboard
 
 ## Architecture Design
@@ -32,6 +33,112 @@ This Terraform project deploys a **fully automated, zero-trust Kubernetes cluste
 5. **Emergency Access**: Use `aws ssm start-session` for terminal access (no SSH needed)
 6. **Daily Operations**: Connect to Admin instance via SSM, run kubectl commands directly
 7. **Automated Join**: Control plane stores join command in SSM Parameter Store (base64 encoded), workers automatically retrieve and execute it
+
+## GitOps Architecture
+
+This project follows **industry-standard GitOps practices** with ArgoCD and a separate GitOps repository:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           INTERNET                                   │
+│                              │                                       │
+│    ┌─────────────────────────┴─────────────────────────┐            │
+│    │                      GitHub                        │            │
+│    │                                                    │            │
+│    │   ┌─────────────────┐      ┌───────────────────┐  │            │
+│    │   │    kubeadm      │      │  kubeadm-gitops   │  │            │
+│    │   │   (this repo)   │      │  (manifest repo)  │  │            │
+│    │   │                 │      │                   │  │            │
+│    │   │ • App source    │      │ • K8s manifests   │  │            │
+│    │   │ • Dockerfiles   │      │ • Deployment YAML │  │            │
+│    │   │ • CI/CD config  │      │ • Service configs │  │            │
+│    │   │ • Terraform     │      │                   │  │            │
+│    │   └────────┬────────┘      └─────────┬─────────┘  │            │
+│    │            │                         │            │            │
+│    └────────────┼─────────────────────────┼────────────┘            │
+│                 │                         │                          │
+│                 │ CI/CD pushes            │ ArgoCD pulls             │
+│                 │ image tags              │ manifests                │
+│                 │                         │                          │
+│                 ▼                         ▼                          │
+│    ┌────────────────────────────────────────────────────┐           │
+│    │                  NAT Gateway                        │           │
+│    │              (outbound only)                        │           │
+│    └────────────────────────┬───────────────────────────┘           │
+│                             │                                        │
+│    ┌────────────────────────▼───────────────────────────┐           │
+│    │           Private Kubernetes Cluster                │           │
+│    │                                                     │           │
+│    │   ┌─────────────┐    ┌──────────────────────────┐  │           │
+│    │   │   ArgoCD    │───▶│     Application Pods     │  │           │
+│    │   │  (GitOps)   │    │  • Go Backend            │  │           │
+│    │   │             │    │  • React Frontend        │  │           │
+│    │   │ Watches:    │    │  • MongoDB               │  │           │
+│    │   │ kubeadm-    │    └──────────────────────────┘  │           │
+│    │   │ gitops repo │                                  │           │
+│    │   └─────────────┘                                  │           │
+│    │                                                     │           │
+│    │   ✅ Zero inbound access                           │           │
+│    │   ✅ Pull-based GitOps (ArgoCD pulls, never push)  │           │
+│    │   ✅ Git as single source of truth                 │           │
+│    │   ✅ Automatic sync on manifest changes            │           │
+│    │                                                     │           │
+│    └─────────────────────────────────────────────────────┘           │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Separate Repositories?
+
+| Aspect | Benefit |
+|--------|---------|
+| **Security** | Code repo keeps branch protection; GitOps repo allows automated pushes |
+| **Separation of Concerns** | Application code ≠ Deployment configuration |
+| **Audit Trail** | Every deployment is a Git commit with full history |
+| **Disaster Recovery** | Cluster dies? Repo is safe. New cluster syncs automatically |
+| **Multi-Cluster** | Same GitOps repo can deploy to dev/staging/prod clusters |
+
+### Repository Structure
+
+**This Repository (`kubeadm`):**
+```
+├── k8s-app/backend/      # Go application source
+├── k8s-app/frontend/     # React application source
+├── .github/workflows/    # CI/CD pipeline
+├── modules/              # Terraform infrastructure
+└── ...
+```
+
+**GitOps Repository (`kubeadm-gitops`):**
+```
+└── k8s-app/k8s/
+    ├── 01-namespace.yaml
+    ├── 02-mongodb-hostpath.yaml
+    ├── 03-go-backend.yaml
+    ├── 04-react-frontend.yaml
+    └── 04-ingress.yaml
+```
+
+### Deployment Flow
+
+```
+1. Developer pushes code to kubeadm repo
+                    ↓
+2. GitHub Actions runs CI/CD pipeline:
+   • SonarQube SAST scan
+   • Hadolint Dockerfile lint
+   • Docker build & push to Docker Hub
+   • Trivy vulnerability scan
+   • OWASP ZAP DAST scan
+   • DefectDojo report upload
+                    ↓
+3. Pipeline updates image tags in kubeadm-gitops repo
+                    ↓
+4. ArgoCD detects changes (watches kubeadm-gitops)
+                    ↓
+5. ArgoCD syncs cluster automatically (rolling update)
+                    ↓
+6. Zero-downtime deployment complete! ✅
+```
 
 ## Project Structure
 
@@ -95,7 +202,7 @@ This Terraform project deploys a **fully automated, zero-trust Kubernetes cluste
 │   └── terraform.tfvars        # Configuration values
 ├── .github/
 │   └── workflows/
-│       └── ci-cd.yml            # CI/CD pipeline (SonarQube + Hadolint + Trivy + ZAP + DefectDojo + GitOps)
+│       └── ci-cd.yml            # CI/CD pipeline (Hadolint + Semgrep + Trivy + ZAP + DefectDojo)
 ├── defectdojo/
 │   └── docker-compose.yml      # Self-hosted DefectDojo (security findings dashboard)
 └── README.md                    # This file
@@ -430,86 +537,53 @@ Outbound: ALL
 
 ## CI/CD Pipeline
 
-The project includes a **GitHub Actions pipeline** (`.github/workflows/ci-cd.yml`) that validates pull requests and, on pushes to `main`, publishes images and deploys through GitOps.
+The project includes a **GitHub Actions pipeline** (`.github/workflows/ci-cd.yml`) that runs on every push to `main` and on pull requests.
 
-### CI/CD Architecture Diagram
+### Pipeline Architecture
 
-The diagram below shows the main systems, integrations, artifacts, and deployment targets. The step-by-step job order is described in the pipeline flow section that follows.
-
-```mermaid
-flowchart TB
-   dev[Developer]
-   repo[(GitHub Repository)]
-
-   subgraph gh[GitHub]
-      actions[GitHub Actions Workflow]
-      artifacts[(Workflow Artifacts)]
-   end
-
-   subgraph ci[CI Runner]
-      checkout[Source Checkout]
-      sonarscan[SonarQube Scan]
-      hadolint[Hadolint]
-      build[Docker Build]
-      trivy[Trivy Scan]
-      zap[OWASP ZAP]
-   end
-
-   subgraph sec[Security Platforms]
-      sonar[(SonarQube or SonarCloud)]
-      dojo[(DefectDojo)]
-   end
-
-   subgraph delivery[Delivery and Runtime]
-      hub[(Docker Hub)]
-      gitops[Manifest Update Commit]
-      argo[Argo CD]
-      cluster[(Kubernetes Cluster)]
-   end
-
-   dev -->|push or pull request| repo
-   repo --> actions
-   actions --> checkout
-   checkout --> sonarscan
-   checkout --> hadolint
-   checkout --> build
-
-   sonarscan -->|SAST results| sonar
-   hadolint -->|lint reports| artifacts
-   build -->|backend and frontend images| artifacts
-   artifacts --> trivy
-   artifacts --> zap
-   trivy -->|vulnerability reports| artifacts
-   zap -->|DAST reports| artifacts
-   artifacts -->|Hadolint, Trivy, ZAP reports| dojo
-
-   build -->|main branch only| hub
-   actions -->|update image tags on main| gitops
-   gitops --> repo
-   repo -->|watched by| argo
-   hub -->|image pull| cluster
-   argo -->|sync manifests| cluster
 ```
-
-### Pipeline Flow
-
-- Pull requests run source analysis, Dockerfile linting, image builds, and Trivy vulnerability scanning.
-- Pushes to `main` additionally publish SHA-tagged images to Docker Hub, run OWASP ZAP against the frontend container, upload supported scan reports to DefectDojo, and update Kubernetes manifests for Argo CD.
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        CI/CD Pipeline Flow                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐  │
+│  │   Step   │   │   Step   │   │   Step   │   │   Step   │   │   Step   │  │
+│  │    1     │──▶│    2     │──▶│    3     │──▶│    4     │──▶│    5     │  │
+│  │          │   │          │   │          │   │          │   │          │  │
+│  │ SonarQube│   │ Hadolint │   │  Docker  │   │  Trivy   │   │  Docker  │  │
+│  │   SAST   │   │   Lint   │   │  Build   │   │   Scan   │   │   Push   │  │
+│  └──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘  │
+│                                                                    │         │
+│                                                                    ▼         │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐◀──────────────────────┘         │
+│  │   Step   │   │   Step   │   │   Step   │                                 │
+│  │    8     │◀──│    7     │◀──│    6     │                                 │
+│  │          │   │          │   │          │                                 │
+│  │  GitOps  │   │ DefectDojo   │ OWASP ZAP│                                 │
+│  │  Deploy  │   │  Upload  │   │   DAST   │                                 │
+│  └────┬─────┘   └──────────┘   └──────────┘                                 │
+│       │                                                                      │
+│       ▼                                                                      │
+│  ┌─────────────────────────────────────┐                                    │
+│  │  Push updated image tags to         │                                    │
+│  │  kubeadm-gitops repository          │──────▶ ArgoCD auto-syncs cluster  │
+│  └─────────────────────────────────────┘                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ### Pipeline Jobs
 
-| Step | Job | Tool | What it does |
-|------|-----|------|--------------|
-| 1 | **SonarQube SAST** | SonarQube | Scans Go + React source code for bugs, vulnerabilities, and code smells |
-| 2 | **Hadolint Dockerfile Lint** | Hadolint | Lints the backend and frontend Dockerfiles and stores JSON reports as artifacts |
-| 3 | **Docker Build** | Docker | Builds backend and frontend images and saves them as tar artifacts for downstream jobs |
-| 4 | **Trivy Vulnerability Scan** | Trivy | Loads the built images and scans them for `CRITICAL`, `HIGH`, and `MEDIUM` vulnerabilities |
-| 5 | **Docker Push** | Docker Hub | On pushes to `main`, publishes backend and frontend images with both the commit SHA and `latest` tags |
-| 6 | **OWASP ZAP DAST** | OWASP ZAP | On pushes to `main`, runs a live baseline scan against the frontend container |
-| 7 | **Upload to DefectDojo** | DefectDojo API | Imports available Hadolint, Trivy, and ZAP reports into the central findings dashboard |
-| 8 | **Deploy (GitOps)** | Git + Argo CD | Commits SHA-pinned image tags to the manifests so Argo CD can sync the cluster |
-
-**Note:** SonarQube findings stay in SonarQube/SonarCloud. The current workflow imports Hadolint, Trivy, and ZAP reports into DefectDojo.
+| Step | Tool | Type | What it does |
+|------|------|------|--------------|
+| 1 | **SonarQube** | SAST | Static analysis of Go + React source code |
+| 2 | **Hadolint** | Dockerfile Lint | Checks Dockerfiles for bad practices |
+| 3 | **Docker Build** | Build | Builds multi-stage images, saves as artifacts |
+| 4 | **Trivy** | Image Scan | Scans container images for CVEs |
+| 5 | **Docker Push** | Push | Pushes SHA-tagged images to Docker Hub |
+| 6 | **OWASP ZAP** | DAST | Live baseline scan against running frontend |
+| 7 | **DefectDojo** | Upload | Pushes all scan reports to DefectDojo |
+| 8 | **GitOps Deploy** | Deploy | Updates image tags in `kubeadm-gitops` repo |
 
 ### Required GitHub Secrets
 
@@ -517,12 +591,14 @@ Go to **Settings → Secrets and variables → Actions** in your GitHub repo:
 
 | Secret | Description |
 |--------|-------------|
-| `SONAR_TOKEN` | SonarQube or SonarCloud authentication token |
-| `SONAR_HOST_URL` | SonarQube base URL (for example `https://sonarcloud.io`) |
+| `SONAR_TOKEN` | SonarQube/SonarCloud authentication token |
+| `SONAR_HOST_URL` | SonarQube URL (e.g., `https://sonarcloud.io`) |
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | Docker Hub access token ([create one here](https://hub.docker.com/settings/security)) |
-| `DEFECTDOJO_URL` | DefectDojo base URL (e.g. `http://your-server:8080`) |
+| `DEFECTDOJO_URL` | DefectDojo base URL (e.g., `http://your-server:8080`) |
 | `DEFECTDOJO_API_KEY` | DefectDojo API key (get from DefectDojo → API v2 Key) |
+
+> **Note:** The GitOps deploy step uses `GITHUB_TOKEN` (automatically provided) to push to `kubeadm-gitops`.
 
 ## DefectDojo Setup
 
@@ -554,11 +630,12 @@ All scan results are uploaded under:
 Each pipeline run creates individual test entries:
 - `Hadolint Backend - <commit SHA>`
 - `Hadolint Frontend - <commit SHA>`
+- `Semgrep Backend SAST - <commit SHA>`
+- `Semgrep Frontend SAST - <commit SHA>`
 - `Trivy Backend Image - <commit SHA>`
 - `Trivy Frontend Image - <commit SHA>`
-- `OWASP ZAP DAS - <commit SHA>`
-
-SonarQube analysis results remain available in SonarQube/SonarCloud rather than appearing as DefectDojo test entries.
+- `Trivy K8s Config - <commit SHA>`
+- `OWASP ZAP DAST - <commit SHA>`
 
 ### Stop DefectDojo
 
@@ -571,3 +648,185 @@ docker compose -f defectdojo/docker-compose.yml down -v
 ```
 
 
+
+## ArgoCD Setup
+
+ArgoCD is deployed inside the cluster and manages all application deployments via GitOps.
+
+### Installation (via deploy.sh)
+
+ArgoCD is automatically installed when you run the deploy script on the Admin instance:
+
+```bash
+# Connect to Admin instance
+aws ssm start-session --target <ADMIN_INSTANCE_ID> --region us-east-1
+
+# Switch to ubuntu user
+sudo su - ubuntu
+
+# Run deploy script (installs NGINX Ingress + ArgoCD + registers app)
+./k8s-app/deploy.sh
+```
+
+### ArgoCD Application Configuration
+
+ArgoCD watches the `kubeadm-gitops` repository:
+
+```yaml
+# k8s-app/argocd/argocd-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: k8s-app
+  namespace: argocd
+spec:
+  source:
+    repoURL: https://github.com/syedibrahim-dev/kubeadm-gitops.git
+    targetRevision: main
+    path: k8s-app/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test-app
+  syncPolicy:
+    automated:
+      prune: true      # Delete resources removed from Git
+      selfHeal: true   # Revert manual changes back to Git state
+```
+
+### Access ArgoCD Dashboard
+
+```bash
+# On Admin instance, port-forward the ArgoCD server
+kubectl port-forward svc/argocd-server -n argocd 8443:443 &
+
+# Get the initial admin password
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d && echo
+
+# Then use SSM port forwarding from your local machine
+aws ssm start-session --target <ADMIN_INSTANCE_ID> \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters 'portNumber=8443,localPortNumber=8443'
+
+# Access: https://localhost:8443
+# Login: admin / <password from above>
+```
+
+### Verify GitOps Sync
+
+```bash
+# Check ArgoCD application status
+kubectl get application k8s-app -n argocd
+
+# View sync status
+kubectl get application k8s-app -n argocd -o jsonpath='{.status.sync.status}'
+
+# View which repo ArgoCD is watching
+kubectl get application k8s-app -n argocd -o jsonpath='{.spec.source.repoURL}'
+# Should output: https://github.com/syedibrahim-dev/kubeadm-gitops.git
+```
+
+### Manual Sync (if needed)
+
+```bash
+# Force a sync
+kubectl patch application k8s-app -n argocd --type=merge \
+  -p '{"operation":{"initiatedBy":{"username":"manual"},"sync":{"revision":"main"}}}'
+
+# Or use ArgoCD CLI
+argocd app sync k8s-app
+```
+
+## Setting Up the GitOps Repository
+
+If you're setting up from scratch, create the `kubeadm-gitops` repository:
+
+### 1. Create Repository on GitHub
+
+```bash
+# Go to https://github.com/new
+# Name: kubeadm-gitops
+# Visibility: Public (or Private with appropriate access)
+# Do NOT add README (we'll push content)
+```
+
+### 2. Initialize with Manifests
+
+```bash
+# Clone the empty repo
+git clone https://github.com/<YOUR_USERNAME>/kubeadm-gitops.git
+cd kubeadm-gitops
+
+# Create directory structure
+mkdir -p k8s-app/k8s
+
+# Copy manifests from this repo
+cp ~/kubeadm/k8s-app/k8s/*.yaml k8s-app/k8s/
+
+# Create README
+cat > README.md << 'README'
+# kubeadm-gitops
+
+GitOps repository for Kubernetes deployments. Managed by ArgoCD.
+
+## Structure
+
+```
+k8s-app/k8s/
+├── 01-namespace.yaml
+├── 02-mongodb-hostpath.yaml
+├── 03-go-backend.yaml
+├── 04-react-frontend.yaml
+└── 04-ingress.yaml
+```
+
+## How It Works
+
+1. CI/CD pipeline in `kubeadm` builds and tests the application
+2. On successful merge to `main`, pipeline updates image tags here
+3. ArgoCD detects changes and syncs the cluster automatically
+README
+
+# Commit and push
+git add .
+git commit -m "Initial commit: Add Kubernetes manifests"
+git push origin main
+```
+
+### 3. Ensure No Branch Protection
+
+**Important:** The `kubeadm-gitops` repository should NOT have branch protection on `main`. This allows the CI/CD pipeline to push updated image tags automatically.
+
+Go to: `https://github.com/<YOUR_USERNAME>/kubeadm-gitops/settings/branches`
+- Ensure no protection rules are set on `main`
+
+## Troubleshooting
+
+### ArgoCD can't reach GitHub
+
+If ArgoCD fails to sync, verify outbound connectivity:
+
+```bash
+# On a pod in the cluster
+kubectl run test --rm -it --image=alpine -- wget -qO- https://github.com
+```
+
+Your NAT Gateway should allow outbound HTTPS traffic.
+
+### Image tags not updating
+
+Check the CI/CD pipeline logs in GitHub Actions. Common issues:
+- Missing `GITHUB_TOKEN` permissions
+- Branch protection on `kubeadm-gitops` (should be disabled)
+- Incorrect repository name in workflow
+
+### ArgoCD sync stuck
+
+```bash
+# Check ArgoCD logs
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller
+
+# Force refresh
+kubectl patch application k8s-app -n argocd --type=merge \
+  -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}'
+```
