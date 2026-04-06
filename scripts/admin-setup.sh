@@ -121,4 +121,66 @@ fi
 # Create a marker file to indicate setup is complete
 echo "Setup completed at $(date)" > /home/ubuntu/admin-setup-complete.txt
 
+# ==========================================
+# AUTOMATIC APPLICATION DEPLOYMENT
+# ==========================================
+%{ if enable_auto_deploy }
+echo ""
+echo "=========================================="
+echo "AUTOMATIC DEPLOYMENT ENABLED"
+echo "=========================================="
+
+# Check if k8s-app was downloaded successfully
+if [ -f /home/ubuntu/k8s-app/deploy.sh ]; then
+    
+    # Wait for all worker nodes to be Ready
+    echo "Waiting for ${worker_count} worker node(s) to be Ready..."
+    expected_nodes=$((${worker_count} + 1))  # workers + control plane
+    max_wait=600  # 10 minutes max
+    elapsed=0
+    
+    while true; do
+        ready_nodes=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready" || echo "0")
+        
+        if [ "$ready_nodes" -ge "$expected_nodes" ]; then
+            echo "All $expected_nodes nodes are Ready!"
+            kubectl get nodes
+            break
+        fi
+        
+        if [ $elapsed -ge $max_wait ]; then
+            echo "WARNING: Timeout waiting for nodes. Current ready: $ready_nodes, expected: $expected_nodes"
+            echo "Proceeding with deployment anyway..."
+            break
+        fi
+        
+        echo "Waiting for nodes... ($ready_nodes/$expected_nodes ready, ${elapsed}s elapsed)"
+        sleep 15
+        elapsed=$((elapsed + 15))
+    done
+    
+    # Run deploy.sh
+    echo ""
+    echo "Running deploy.sh..."
+    cd /home/ubuntu/k8s-app
+    
+    # Run as ubuntu user but with root's kubeconfig (already set up)
+    if /home/ubuntu/k8s-app/deploy.sh >> /var/log/k8s-deploy.log 2>&1; then
+        echo "Deployment completed successfully!"
+        echo "Deployment completed at $(date)" >> /home/ubuntu/admin-setup-complete.txt
+    else
+        echo "WARNING: deploy.sh exited with error. Check /var/log/k8s-deploy.log"
+        echo "You can retry manually: cd /home/ubuntu/k8s-app && ./deploy.sh"
+    fi
+else
+    echo "WARNING: /home/ubuntu/k8s-app/deploy.sh not found. Skipping auto-deploy."
+    echo "Make sure k8s-app is uploaded to S3 first."
+fi
+%{ else }
+echo ""
+echo "Auto-deploy disabled. To deploy manually:"
+echo "  cd /home/ubuntu/k8s-app && ./deploy.sh"
+%{ endif }
+
+echo ""
 echo "Admin instance setup completed successfully!"
