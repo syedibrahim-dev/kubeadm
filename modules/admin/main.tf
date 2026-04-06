@@ -90,6 +90,8 @@ resource "aws_instance" "admin" {
     control_plane_name   = var.control_plane_name
     control_plane_ip     = var.control_plane_private_ip
     s3_bucket_name       = var.s3_bucket_name
+    enable_auto_deploy   = var.enable_auto_deploy
+    worker_count         = var.worker_count
   }) : null
 
   tags = {
