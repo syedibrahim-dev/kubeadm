@@ -149,21 +149,12 @@ This project follows **industry-standard GitOps practices** with ArgoCD and a se
 ├── data.tf                      # Data sources (availability zones, AMI, account ID)
 ├── variables.tf                 # Root-level variable definitions
 ├── outputs.tf                   # Root-level outputs
-├── upload-app.sh                # Called automatically by Terraform (also runnable manually)
 ├── modules/                     # Reusable modules
 │   ├── vpc/                     # VPC, subnets, NAT, routing
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   └── outputs.tf
 │   ├── security/                # Security groups (admin + k8s nodes)
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   ├── s3/                      # S3 bucket for k8s-app delivery
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   ├── app-upload/              # Syncs k8s-app/ to S3 on every apply
 │   │   ├── main.tf
 │   │   ├── variables.tf
 │   │   └── outputs.tf
@@ -178,8 +169,8 @@ This project follows **industry-standard GitOps practices** with ArgoCD and a se
 ├── scripts/                     # Automation scripts (run via cloud-init)
 │   ├── control-plane-setup.sh  # Auto-install K8s on control plane
 │   ├── worker-setup.sh          # Auto-install K8s on workers
-│   └── admin-setup.sh           # Auto-configure kubectl + download k8s-app from S3
-├── k8s-app/                     # Application (synced to S3 on apply, deployed on admin)
+│   └── admin-setup.sh           # Auto-configure kubectl + bootstrap k8s-app from Git
+├── k8s-app/                     # Application source + admin bootstrap scripts
 │   ├── deploy.sh                # Deploy script (run on admin instance)
 │   ├── backend/                 # Go REST API (multi-stage → ~20MB distroless)
 │   │   ├── main.go
@@ -192,12 +183,8 @@ This project follows **industry-standard GitOps practices** with ArgoCD and a se
 │   │   ├── vite.config.js
 │   │   ├── nginx.conf
 │   │   └── Dockerfile
-│   └── k8s/                     # Kubernetes manifests
-│       ├── 01-namespace.yaml
-│       ├── 02-mongodb-hostpath.yaml
-│       ├── 03-go-backend.yaml
-│       ├── 04-react-frontend.yaml
-│       └── 04-ingress.yaml
+│   └── argocd/
+│       └── argocd-app.yaml      # ArgoCD application manifest (points to kubeadm-gitops)
 ├── config/
 │   └── terraform.tfvars        # Configuration values
 ├── .github/
@@ -292,8 +279,8 @@ docker push <YOUR_DOCKERHUB_USER>/node-frontend:latest
 ```
 
 Then update the image names in the manifests:
-- `k8s-app/k8s/03-go-backend.yaml` → `image: <YOUR_DOCKERHUB_USER>/go-backend:latest`
-- `k8s-app/k8s/04-react-frontend.yaml` → `image: <YOUR_DOCKERHUB_USER>/node-frontend:latest`
+- `kubeadm-gitops/k8s-app/k8s/03-go-backend.yaml` → `image: <YOUR_DOCKERHUB_USER>/go-backend:latest`
+- `kubeadm-gitops/k8s-app/k8s/04-react-frontend.yaml` → `image: <YOUR_DOCKERHUB_USER>/node-frontend:latest`
 
 #### Frontend multi-stage size comparison
 
@@ -309,26 +296,25 @@ docker build --target production -t frontend:optimised ./k8s-app/frontend
 docker images | grep frontend
 ```
 
-### Step 2 — Apply infrastructure (S3 upload is automatic)
+### Step 2 — Apply infrastructure (Git bootstrap is automatic)
 
 ```bash
 terraform apply -var-file="config/terraform.tfvars"
 ```
 
 Terraform will:
-1. Create all infrastructure (VPC, EC2, S3 bucket, IAM roles)
-2. **Automatically upload `k8s-app/` to S3** via the `app-upload` module
-3. Admin instance boots, downloads `k8s-app/` from S3, and configures kubectl
+1. Create all infrastructure (VPC, EC2, IAM roles, security groups, NAT)
+2. Bootstrap admin instance with kubectl + kubeconfig via SSM
+3. Clone `${github_repo}` with sparse checkout (`k8s-app/`) on admin instance
+4. Run `k8s-app/deploy.sh` to install ArgoCD and register the GitOps app
 
-The upload re-triggers automatically on every `terraform apply` whenever any file inside `k8s-app/` changes — no manual steps needed.
+If auto-deploy is disabled, deploy manually from the admin instance:
 
-> **If the admin instance is already running** (S3 was empty on first boot), re-sync manually:
-> ```bash
-> sudo su - ubuntu
-> aws s3 sync s3://<BUCKET_NAME>/k8s-app/ ~/k8s-app/ --region us-east-1 --delete
-> chmod +x ~/k8s-app/deploy.sh
-> ```
-> Get the bucket name with: `terraform output s3_bucket_name`
+```bash
+aws ssm start-session --target <ADMIN_INSTANCE_ID> --region us-east-1
+sudo su - ubuntu
+cd ~/k8s-app && bash deploy.sh
+```
 
 ### Step 3 — Deploy on the admin instance
 
@@ -343,7 +329,7 @@ sudo su - ubuntu
 cd ~/k8s-app && bash deploy.sh
 ```
 
-`deploy.sh` installs the nginx ingress controller, applies all manifests, and waits for each component to become ready.
+`deploy.sh` installs nginx ingress + ArgoCD, registers the `k8s-app` ArgoCD application, and waits for workload readiness after initial sync.
 
 ## Outputs
 
