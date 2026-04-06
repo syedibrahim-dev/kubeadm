@@ -173,8 +173,9 @@ if [ -f /home/ubuntu/k8s-app/deploy.sh ]; then
     echo "Running deploy.sh..."
     cd /home/ubuntu/k8s-app
     
-    # Run as ubuntu user but with root's kubeconfig (already set up)
-    if /home/ubuntu/k8s-app/deploy.sh >> /var/log/k8s-deploy.log 2>&1; then
+    # Ensure KUBECONFIG is set and deploy.sh runs with proper kubectl access
+    export KUBECONFIG=/root/.kube/config
+    if bash /home/ubuntu/k8s-app/deploy.sh >> /var/log/k8s-deploy.log 2>&1; then
         echo "Deployment completed successfully!"
         echo "Deployment completed at $(date)" >> /home/ubuntu/admin-setup-complete.txt
     else
