@@ -91,15 +91,14 @@ output "setup_instructions" {
     DEPLOY YOUR APPLICATION
     ═══════════════════════════════════════════════════════════
 
-    Step 1 — Upload k8s-app to S3 (run on your LOCAL machine):
-      bash upload-app.sh
-
-    Step 2 — If admin instance is already running, re-sync on it:
-      sudo su - ubuntu
-      aws s3 sync s3://${module.s3.bucket_name}/k8s-app/ ~/k8s-app/ --region ${var.aws_region} --delete
-      chmod +x ~/k8s-app/deploy.sh
-
-    Step 3 — Deploy the stack:
+    The cluster is set up with automatic deployment!
+    
+    - ArgoCD is automatically installed
+    - Application manifests are synced from: ${var.github_repo}
+    - GitOps pipeline updates image tags in kubeadm-gitops repo
+    
+    To manually re-deploy (if needed):
+      ${format("aws ssm start-session --target %s --region %s", module.admin.admin_id, var.aws_region)}
       cd ~/k8s-app && bash deploy.sh
 
     ═══════════════════════════════════════════════════════════

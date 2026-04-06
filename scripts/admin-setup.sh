@@ -101,21 +101,30 @@ chmod 600 /home/ssm-user/.kube/config
 rm -f /tmp/kubeconfig
 
 # ==========================================
-# DOWNLOAD k8s-app FROM S3
+# CLONE k8s-app FROM GITHUB
 # ==========================================
-echo "Downloading k8s-app from S3 bucket: ${s3_bucket_name}..."
-mkdir -p /home/ubuntu/k8s-app
+echo "Cloning kubeadm repository for bootstrap files..."
+cd /home/ubuntu
 
-if aws s3 ls s3://${s3_bucket_name}/k8s-app/ --region ${aws_region} > /dev/null 2>&1; then
-    aws s3 sync s3://${s3_bucket_name}/k8s-app/ /home/ubuntu/k8s-app/ \
-        --region ${aws_region} --delete
+# Install git if not present
+apt-get install -y git >/dev/null 2>&1
+
+# Clone the repository (only k8s-app directory)
+if git clone --depth 1 --filter=blob:none --sparse https://github.com/${github_repo}.git; then
+    cd kubeadm
+    git sparse-checkout set k8s-app
+    
+    # Move k8s-app to ubuntu home and cleanup
+    mv k8s-app /home/ubuntu/
+    cd /home/ubuntu
+    rm -rf kubeadm
+    
     chown -R ubuntu:ubuntu /home/ubuntu/k8s-app
-    # Make deploy script executable if present
-    [ -f /home/ubuntu/k8s-app/deploy.sh ] && chmod +x /home/ubuntu/k8s-app/deploy.sh
-    echo "k8s-app downloaded successfully to /home/ubuntu/k8s-app/"
+    chmod +x /home/ubuntu/k8s-app/deploy.sh
+    echo "k8s-app cloned successfully from GitHub"
 else
-    echo "WARNING: No k8s-app found in S3 yet. Run upload-app.sh from your local machine first."
-    echo "  aws s3 sync ./k8s-app/ s3://${s3_bucket_name}/k8s-app/ --region ${aws_region}"
+    echo "ERROR: Failed to clone repository. Check network and repo access."
+    exit 1
 fi
 
 # Create a marker file to indicate setup is complete
