@@ -69,3 +69,9 @@ variable "enable_auto_deploy" {
   type        = bool
   default     = true
 }
+
+variable "github_repo" {
+  description = "GitHub repository for bootstrap files (format: owner/repo)"
+  type        = string
+  default     = "syedibrahim-dev/kubeadm"
+}

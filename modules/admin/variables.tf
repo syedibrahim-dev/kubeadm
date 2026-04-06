@@ -56,9 +56,10 @@ variable "nat_gateway_id" {
   type        = string
 }
 
-variable "s3_bucket_name" {
-  description = "S3 bucket name where k8s-app is stored for automated download"
+variable "github_repo" {
+  description = "GitHub repository for bootstrap files (format: owner/repo)"
   type        = string
+  default     = "syedibrahim-dev/kubeadm"
 }
 
 variable "worker_count" {

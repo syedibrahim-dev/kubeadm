@@ -34,14 +34,6 @@ module "compute" {
   nat_gateway_id              = module.vpc.nat_gateway_id
 }
 
-# S3 Module - Stores k8s-app for automated delivery to admin instance
-module "s3" {
-  source = "./modules/s3"
-
-  aws_region = var.aws_region
-  account_id = data.aws_caller_identity.current.account_id
-}
-
 # Admin Module - Creates private kubectl management instance (depends on control plane)
 module "admin" {
   source = "./modules/admin"
@@ -57,17 +49,6 @@ module "admin" {
   enable_auto_setup        = var.enable_auto_setup
   enable_auto_deploy       = var.enable_auto_deploy
   nat_gateway_id           = module.vpc.nat_gateway_id
-  s3_bucket_name           = module.s3.bucket_name
   worker_count             = var.compute.worker_count
-}
-
-# App Upload Module - Syncs k8s-app/ to S3 on every apply (re-triggers on file changes)
-module "app_upload" {
-  source = "./modules/app-upload"
-
-  bucket_name   = module.s3.bucket_name
-  app_dir       = "${path.module}/k8s-app"
-  upload_script = "${path.module}/upload-app.sh"
-
-  depends_on = [module.s3]
+  github_repo              = var.github_repo
 }

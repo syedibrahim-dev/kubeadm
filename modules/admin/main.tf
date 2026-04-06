@@ -42,29 +42,6 @@ resource "aws_iam_role_policy" "admin_ssm_policy" {
   })
 }
 
-# IAM Policy for Admin Instance (S3 Read Access)
-resource "aws_iam_role_policy" "admin_s3_policy" {
-  name = "${var.admin_name}-s3-policy"
-  role = aws_iam_role.admin_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          "arn:aws:s3:::${var.s3_bucket_name}",
-          "arn:aws:s3:::${var.s3_bucket_name}/*"
-        ]
-      }
-    ]
-  })
-}
-
 # Attach AWS managed policy for SSM Session Manager
 resource "aws_iam_role_policy_attachment" "admin_ssm_managed" {
   role       = aws_iam_role.admin_role.name
@@ -89,7 +66,7 @@ resource "aws_instance" "admin" {
     aws_region           = var.aws_region
     control_plane_name   = var.control_plane_name
     control_plane_ip     = var.control_plane_private_ip
-    s3_bucket_name       = var.s3_bucket_name
+    github_repo          = var.github_repo
     enable_auto_deploy   = var.enable_auto_deploy
     worker_count         = var.worker_count
   }) : null
