@@ -184,7 +184,7 @@ if [ -f /home/ubuntu/k8s-app/deploy.sh ]; then
     fi
 else
     echo "WARNING: /home/ubuntu/k8s-app/deploy.sh not found. Skipping auto-deploy."
-    echo "Make sure k8s-app is uploaded to S3 first."
+    echo "Make sure the Git bootstrap clone completed successfully first."
 fi
 %{ else }
 echo ""
