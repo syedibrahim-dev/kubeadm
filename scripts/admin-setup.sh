@@ -154,7 +154,7 @@ if [ -f /home/ubuntu/k8s-app/deploy.sh ]; then
             break
         fi
         
-        echo "Waiting for nodes... ($ready_nodes/$expected_nodes ready, ${elapsed}s elapsed)"
+        echo "Waiting for nodes... ($ready_nodes/$expected_nodes ready, $${elapsed}s elapsed)"
         sleep 15
         elapsed=$((elapsed + 15))
     done
