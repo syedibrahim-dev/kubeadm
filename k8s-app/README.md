@@ -26,12 +26,24 @@ A full-stack application deployed via GitOps (ArgoCD) on a private Kubernetes cl
 
 ## Deployment
 
-Deployment is handled by **ArgoCD** (GitOps). See the main [README](../README.md) for details.
+This repo contains **application source code only** (frontend, backend, Dockerfiles).
+
+**Kubernetes manifests** are in the separate GitOps repo:
+- https://github.com/syedibrahim-dev/kubeadm-gitops
+
+Deployment is handled by **ArgoCD** which watches the gitops repo for changes.
 
 ```bash
-# On Admin instance - run the deploy script
+# On Admin instance - run the deploy script (one-time setup)
 ./deploy.sh
 ```
+
+### GitOps Workflow
+
+1. Code change → Push to `kubeadm` repo
+2. GitHub Actions → Build image → Push to ECR
+3. Pipeline updates manifest in `kubeadm-gitops` repo
+4. ArgoCD detects change → Deploys to cluster
 
 ---
 
