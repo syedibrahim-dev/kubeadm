@@ -55,8 +55,10 @@ module "admin" {
   control_plane_name       = var.compute.control_plane_name
   control_plane_private_ip = var.compute.control_plane_private_ip
   enable_auto_setup        = var.enable_auto_setup
+  enable_auto_deploy       = var.enable_auto_deploy
   nat_gateway_id           = module.vpc.nat_gateway_id
   s3_bucket_name           = module.s3.bucket_name
+  worker_count             = var.compute.worker_count
 }
 
 # App Upload Module - Syncs k8s-app/ to S3 on every apply (re-triggers on file changes)
