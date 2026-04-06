@@ -64,6 +64,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		"version":   "2.0.0",
 		"database":  dbStatus,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"version":   "v2.0.0",
 	})
 }
 

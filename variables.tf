@@ -63,3 +63,9 @@ variable "enable_auto_setup" {
   type        = bool
   default     = true
 }
+
+variable "enable_auto_deploy" {
+  description = "Enable automatic deployment of ArgoCD and applications after cluster is ready"
+  type        = bool
+  default     = true
+}

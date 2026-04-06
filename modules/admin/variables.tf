@@ -45,6 +45,12 @@ variable "enable_auto_setup" {
   type        = bool
 }
 
+variable "enable_auto_deploy" {
+  description = "Enable automatic deployment of ArgoCD and applications"
+  type        = bool
+  default     = false
+}
+
 variable "nat_gateway_id" {
   description = "NAT Gateway ID for dependency"
   type        = string
@@ -53,4 +59,10 @@ variable "nat_gateway_id" {
 variable "s3_bucket_name" {
   description = "S3 bucket name where k8s-app is stored for automated download"
   type        = string
+}
+
+variable "worker_count" {
+  description = "Number of worker nodes to wait for before deploying"
+  type        = number
+  default     = 1
 }
