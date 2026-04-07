@@ -46,6 +46,25 @@ resource "aws_security_group" "k8s_nodes_sg" {
     description = "Allow all traffic between K8s nodes"
   }
 
+  # Allow NLB → ingress-nginx HTTP NodePort
+  # NLB does not have a security group; source IPs are client IPs (preserved by NLB)
+  ingress {
+    from_port   = 30080
+    to_port     = 30080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow NLB traffic to ingress-nginx HTTP NodePort"
+  }
+
+  # Allow NLB → ArgoCD server NodePort
+  ingress {
+    from_port   = 30082
+    to_port     = 30082
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow NLB traffic to ArgoCD NodePort"
+  }
+
   # Allow all outbound traffic (for SSM agent, downloading packages via NAT)
   egress {
     from_port   = 0

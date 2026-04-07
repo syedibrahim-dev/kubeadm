@@ -52,3 +52,28 @@ module "admin" {
   worker_count             = var.compute.worker_count
   github_repo              = var.github_repo
 }
+
+# NLB Module - Public-facing load balancer (no port-forwarding needed)
+# Exposes the app on port 80 and ArgoCD UI on port 8080 via a public DNS name.
+module "nlb" {
+  source = "./modules/nlb"
+
+  public_subnet_id    = module.vpc.public_subnet_id
+  vpc_id              = module.vpc.vpc_id
+  worker_instance_ids = module.compute.worker_id
+
+  depends_on = [module.compute]
+}
+
+# ArgoCD Module - Stage 2: runs automatically on the admin EC2 instance (inside VPC)
+# deploy_argocd defaults to false so this is skipped during local Stage 1 apply.
+# admin-setup.sh re-runs terraform with -var="deploy_argocd=true" from inside the VPC
+# where the K8s API server (10.0.x.x:6443) is reachable.
+module "argocd" {
+  count  = var.deploy_argocd ? 1 : 0
+  source = "./modules/argocd"
+
+  gitops_repo_url = var.gitops_repo_url
+  gitops_branch   = var.gitops_branch
+  app_namespace   = var.app_namespace
+}
