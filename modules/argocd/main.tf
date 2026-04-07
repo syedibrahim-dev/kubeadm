@@ -25,35 +25,43 @@ resource "helm_release" "argocd" {
   depends_on = [var.cluster_ready]
 }
 
-resource "kubernetes_manifest" "argocd_application" {
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "k8s-app"
-      namespace = "argocd"
+resource "null_resource" "argocd_application" {
+  triggers = {
+    gitops_repo_url = var.gitops_repo_url
+    gitops_branch   = var.gitops_branch
+    app_namespace   = var.app_namespace
+  }
+
+  provisioner "local-exec" {
+    # Explicit KUBECONFIG so kubectl works regardless of shell environment
+    environment = {
+      KUBECONFIG = "/home/ubuntu/.kube/config"
     }
-    spec = {
-      project = "default"
-      source = {
-        repoURL        = var.gitops_repo_url
-        targetRevision = var.gitops_branch
-        path           = "k8s-app/k8s"
-      }
-      destination = {
-        server    = "https://kubernetes.default.svc"
-        namespace = var.app_namespace
-      }
-      syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
-        syncOptions = [
-          "CreateNamespace=true"
-        ]
-      }
-    }
+
+    command = <<-EOT
+      kubectl apply -f - <<'EOF'
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: k8s-app
+        namespace: argocd
+      spec:
+        project: default
+        source:
+          repoURL: ${var.gitops_repo_url}
+          targetRevision: ${var.gitops_branch}
+          path: k8s-app/k8s
+        destination:
+          server: https://kubernetes.default.svc
+          namespace: ${var.app_namespace}
+        syncPolicy:
+          automated:
+            prune: true
+            selfHeal: true
+          syncOptions:
+          - CreateNamespace=true
+      EOF
+    EOT
   }
 
   depends_on = [helm_release.argocd]
