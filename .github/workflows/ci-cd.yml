@@ -25,8 +25,14 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main]
+    paths:
+      - 'k8s-app/**'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
+    paths:
+      - 'k8s-app/**'
+      - '.github/workflows/**'
 
 env:
   BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/go-backend
@@ -392,9 +398,9 @@ jobs:
       - name: Update image tags in manifests
         run: |
           cd gitops-repo
-          sed -i "s|ibrahimalish/go-backend:.*|ibrahimalish/go-backend:${{ github.sha }}|" \
+          sed -i "s|${{ secrets.DOCKERHUB_USERNAME }}/go-backend:.*|${{ secrets.DOCKERHUB_USERNAME }}/go-backend:${{ github.sha }}|" \
             k8s-app/k8s/03-go-backend.yaml
-          sed -i "s|ibrahimalish/node-frontend:.*|ibrahimalish/node-frontend:${{ github.sha }}|" \
+          sed -i "s|${{ secrets.DOCKERHUB_USERNAME }}/node-frontend:.*|${{ secrets.DOCKERHUB_USERNAME }}/node-frontend:${{ github.sha }}|" \
             k8s-app/k8s/04-react-frontend.yaml
 
           echo "Updated manifests:"
