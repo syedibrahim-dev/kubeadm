@@ -10,7 +10,7 @@ output "argocd_release_name" {
 
 output "argocd_application_name" {
   description = "Name of the ArgoCD application managing the k8s-app"
-  value       = kubernetes_manifest.argocd_application.manifest.metadata.name
+  value       = "k8s-app"
 }
 
 output "ingress_nginx_namespace" {
