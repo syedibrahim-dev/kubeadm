@@ -10,8 +10,9 @@ resource "helm_release" "argocd" {
     yamlencode({
       server = {
         service = {
-          type         = "NodePort"
-          nodePortHttp = 30082
+          type          = "NodePort"
+          nodePortHttp  = 30082
+          nodePortHttps = 30083
         }
       }
       configs = {
