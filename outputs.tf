@@ -43,6 +43,66 @@ output "worker_count" {
   value       = module.compute.worker_count
 }
 
+# ArgoCD Information (only available after admin instance deploys it)
+# These outputs will be visible when running terraform on the admin instance
+# output "argocd_namespace" {
+#   description = "Namespace where ArgoCD is deployed"
+#   value       = module.argocd.argocd_namespace
+# }
+# 
+# output "argocd_application" {
+#   description = "ArgoCD application name managing the k8s-app"
+#   value       = module.argocd.argocd_application_name
+# }
+
+output "nlb_dns_name" {
+  description = "Public DNS name of the NLB — use this to access the app and ArgoCD"
+  value       = module.nlb.nlb_dns_name
+}
+
+output "app_url" {
+  description = "Application URL (via ingress-nginx through NLB)"
+  value       = "http://${module.nlb.nlb_dns_name}"
+}
+
+output "argocd_url" {
+  description = "ArgoCD UI URL (via NLB, no port-forwarding needed)"
+  value       = "http://${module.nlb.nlb_dns_name}:8080"
+}
+
+output "argocd_access_info" {
+  description = "How to access ArgoCD after deployment"
+  value       = <<-EOT
+    
+    ═══════════════════════════════════════════════════════════
+    ARGOCD ACCESS (After Auto-Deployment)
+    ═══════════════════════════════════════════════════════════
+    
+    ArgoCD is automatically deployed on the admin instance via Terraform.
+    
+    To check status:
+      aws ssm start-session --target ${module.admin.admin_instance_id}
+      sudo tail -f /var/log/argocd-deploy.log
+    
+    Once deployed, access ArgoCD:
+    
+    1. Get ArgoCD admin password:
+       kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+    
+    2. Port forward to ArgoCD server:
+       kubectl port-forward svc/argocd-server -n argocd 8443:443
+    
+    3. Access ArgoCD UI:
+       https://localhost:8443
+       Username: admin
+       Password: <from step 1>
+    
+    4. Check application sync status:
+       kubectl get application k8s-app -n argocd
+  EOT
+}
+
+
 output "setup_instructions" {
   description = "Quick setup instructions"
   value = (var.enable_auto_setup ? <<-EOT

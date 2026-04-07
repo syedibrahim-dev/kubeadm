@@ -27,7 +27,15 @@ echo "Internet connectivity established!"
 
 # Update and install prerequisites
 apt-get update
-apt-get install -y apt-transport-https ca-certificates curl gpg awscli
+apt-get install -y apt-transport-https ca-certificates curl gpg awscli unzip git
+
+# Install Terraform for ArgoCD deployment
+echo "Installing Terraform..."
+wget -q https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_linux_amd64.zip
+unzip -q terraform_1.10.5_linux_amd64.zip -d /usr/local/bin/
+rm terraform_1.10.5_linux_amd64.zip
+chmod +x /usr/local/bin/terraform
+terraform --version
 
 # Add Kubernetes repository
 mkdir -p /etc/apt/keyrings
@@ -127,69 +135,130 @@ else
     exit 1
 fi
 
+# Clone infrastructure repository for ArgoCD Terraform deployment
+echo "Cloning infrastructure repository..."
+cd /home/ubuntu
+if [ ! -d "kubeadm-infra" ]; then
+    git clone https://github.com/${github_repo}.git kubeadm-infra
+    chown -R ubuntu:ubuntu /home/ubuntu/kubeadm-infra
+    echo "Infrastructure repository cloned to /home/ubuntu/kubeadm-infra"
+else
+    echo "Infrastructure repository already exists at /home/ubuntu/kubeadm-infra"
+fi
+
+# Create helper script for ArgoCD deployment
+cat > /home/ubuntu/deploy-argocd.sh << 'DEPLOY_SCRIPT'
+#!/bin/bash
+# Helper script to deploy ArgoCD using Terraform (Stage 2)
+# Run this after the cluster is fully ready
+
+set -e
+
+echo "Deploying ArgoCD via Terraform (Stage 2)..."
+cd /home/ubuntu/kubeadm-infra
+
+# Copy kubeconfig so Helm/Kubernetes providers can reach the API server
+mkdir -p .terraform
+cp ~/.kube/config .terraform/kubeconfig
+chown -R ubuntu:ubuntu .terraform
+chmod 600 .terraform/kubeconfig
+
+# Initialize Terraform and deploy only the ArgoCD module
+terraform init
+terraform apply -var="deploy_argocd=true" -target='module.argocd[0]' -auto-approve
+
+echo ""
+echo "ArgoCD deployment complete!"
+echo ""
+echo "Get ArgoCD admin password:"
+echo "  kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+echo ""
+echo "Check ArgoCD application status:"
+echo "  kubectl get application k8s-app -n argocd"
+echo ""
+DEPLOY_SCRIPT
+
+chmod +x /home/ubuntu/deploy-argocd.sh
+chown ubuntu:ubuntu /home/ubuntu/deploy-argocd.sh
+
 # Create a marker file to indicate setup is complete
 echo "Setup completed at $(date)" > /home/ubuntu/admin-setup-complete.txt
 
 # ==========================================
-# AUTOMATIC APPLICATION DEPLOYMENT
+# AUTOMATIC ARGOCD DEPLOYMENT
 # ==========================================
 %{ if enable_auto_deploy }
 echo ""
 echo "=========================================="
-echo "AUTOMATIC DEPLOYMENT ENABLED"
+echo "AUTOMATIC ARGOCD DEPLOYMENT ENABLED"
 echo "=========================================="
 
-# Check if k8s-app was downloaded successfully
-if [ -f /home/ubuntu/k8s-app/deploy.sh ]; then
+# Wait for all worker nodes to be Ready
+echo "Waiting for ${worker_count} worker node(s) to be Ready..."
+expected_nodes=$((${worker_count} + 1))  # workers + control plane
+max_wait=600  # 10 minutes max
+elapsed=0
+
+while true; do
+    ready_nodes=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready" || echo "0")
     
-    # Wait for all worker nodes to be Ready
-    echo "Waiting for ${worker_count} worker node(s) to be Ready..."
-    expected_nodes=$((${worker_count} + 1))  # workers + control plane
-    max_wait=600  # 10 minutes max
-    elapsed=0
-    
-    while true; do
-        ready_nodes=$(kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready" || echo "0")
-        
-        if [ "$ready_nodes" -ge "$expected_nodes" ]; then
-            echo "All $expected_nodes nodes are Ready!"
-            kubectl get nodes
-            break
-        fi
-        
-        if [ $elapsed -ge $max_wait ]; then
-            echo "WARNING: Timeout waiting for nodes. Current ready: $ready_nodes, expected: $expected_nodes"
-            echo "Proceeding with deployment anyway..."
-            break
-        fi
-        
-        echo "Waiting for nodes... ($ready_nodes/$expected_nodes ready, $${elapsed}s elapsed)"
-        sleep 15
-        elapsed=$((elapsed + 15))
-    done
-    
-    # Run deploy.sh
-    echo ""
-    echo "Running deploy.sh..."
-    cd /home/ubuntu/k8s-app
-    
-    # Ensure KUBECONFIG is set and deploy.sh runs with proper kubectl access
-    export KUBECONFIG=/root/.kube/config
-    if bash /home/ubuntu/k8s-app/deploy.sh >> /var/log/k8s-deploy.log 2>&1; then
-        echo "Deployment completed successfully!"
-        echo "Deployment completed at $(date)" >> /home/ubuntu/admin-setup-complete.txt
-    else
-        echo "WARNING: deploy.sh exited with error. Check /var/log/k8s-deploy.log"
-        echo "You can retry manually: cd /home/ubuntu/k8s-app && ./deploy.sh"
+    if [ "$ready_nodes" -ge "$expected_nodes" ]; then
+        echo "All $expected_nodes nodes are Ready!"
+        kubectl get nodes
+        break
     fi
+    
+    if [ $elapsed -ge $max_wait ]; then
+        echo "WARNING: Timeout waiting for nodes. Current ready: $ready_nodes, expected: $expected_nodes"
+        echo "Proceeding with deployment anyway..."
+        break
+    fi
+    
+    echo "Waiting for nodes... ($ready_nodes/$expected_nodes ready, $${elapsed}s elapsed)"
+    sleep 15
+    elapsed=$((elapsed + 15))
+done
+
+# Run ArgoCD Terraform deployment (Stage 2 — inside VPC, can reach API server)
+echo ""
+echo "Deploying ArgoCD via Terraform (Stage 2)..."
+cd /home/ubuntu/kubeadm-infra
+
+# Copy kubeconfig to ubuntu user's home (Terraform runs as ubuntu)
+mkdir -p /home/ubuntu/.kube
+cp /root/.kube/config /home/ubuntu/.kube/config
+chown -R ubuntu:ubuntu /home/ubuntu/.kube
+
+# Copy kubeconfig into Terraform's path so Helm/Kubernetes providers can connect
+# (API server is at 10.x.x.x:6443 — only reachable from inside the VPC)
+mkdir -p /home/ubuntu/kubeadm-infra/.terraform
+cp /root/.kube/config /home/ubuntu/kubeadm-infra/.terraform/kubeconfig
+chown -R ubuntu:ubuntu /home/ubuntu/kubeadm-infra/.terraform
+chmod 600 /home/ubuntu/kubeadm-infra/.terraform/kubeconfig
+
+# Run as ubuntu user
+if su - ubuntu -c "cd /home/ubuntu/kubeadm-infra && terraform init && terraform apply -var='deploy_argocd=true' -target='module.argocd[0]' -auto-approve" >> /var/log/argocd-deploy.log 2>&1; then
+    echo "ArgoCD deployment completed successfully!"
+    echo "ArgoCD deployed at $(date)" >> /home/ubuntu/admin-setup-complete.txt
+    
+    # Show access instructions
+    echo ""
+    echo "=========================================="
+    echo "ArgoCD Access Information"
+    echo "=========================================="
+    echo "Get admin password:"
+    echo "  kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+    echo ""
+    echo "Check application status:"
+    echo "  kubectl get application k8s-app -n argocd"
 else
-    echo "WARNING: /home/ubuntu/k8s-app/deploy.sh not found. Skipping auto-deploy."
-    echo "Make sure the Git bootstrap clone completed successfully first."
+    echo "WARNING: ArgoCD deployment failed. Check /var/log/argocd-deploy.log"
+    echo "You can retry manually: /home/ubuntu/deploy-argocd.sh"
 fi
 %{ else }
 echo ""
-echo "Auto-deploy disabled. To deploy manually:"
-echo "  cd /home/ubuntu/k8s-app && ./deploy.sh"
+echo "Auto-deploy disabled. To deploy ArgoCD manually:"
+echo "  /home/ubuntu/deploy-argocd.sh"
 %{ endif }
 
 echo ""

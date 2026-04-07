@@ -70,8 +70,33 @@ variable "enable_auto_deploy" {
   default     = true
 }
 
+variable "deploy_argocd" {
+  description = "Stage 2 gate: set to true only when running from the admin EC2 inside the VPC. Never set true locally — the K8s API server is unreachable from outside the VPC."
+  type        = bool
+  default     = false
+}
+
 variable "github_repo" {
   description = "GitHub repository for bootstrap files (format: owner/repo)"
   type        = string
   default     = "syedibrahim-dev/kubeadm"
+}
+
+# GitOps Configuration
+variable "gitops_repo_url" {
+  description = "GitOps repository URL for ArgoCD to watch"
+  type        = string
+  default     = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
+}
+
+variable "gitops_branch" {
+  description = "Branch to watch in GitOps repository"
+  type        = string
+  default     = "main"
+}
+
+variable "app_namespace" {
+  description = "Namespace where application will be deployed"
+  type        = string
+  default     = "test-app"
 }
