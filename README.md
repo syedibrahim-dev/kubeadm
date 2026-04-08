@@ -43,6 +43,141 @@ A fully automated, private Kubernetes cluster on AWS provisioned with Terraform 
 
 ---
 
+## Full Architecture
+
+### Phase 1 — Infrastructure Bootstrap (one-time, ~15 mins)
+
+```
+YOUR LAPTOP
+───────────
+terraform apply
+    │
+    ├──► AWS VPC + Subnets + NAT Gateway + Security Groups + NLB
+    │
+    ├──► Control Plane EC2 (boots, runs control-plane-setup.sh)
+    │         │
+    │         │  1. kubeadm init + Calico CNI
+    │         │  2. base64 encode kubeconfig
+    │         │  3. aws ssm put-parameter
+    │         │         └──► SSM Parameter Store
+    │         │               ├── /k8s/K8s-Control-Plane/kubeconfig
+    │         │               └── /k8s/K8s-Control-Plane/join-command
+    │         │
+    ├──► Worker EC2 (boots, runs worker-setup.sh)
+    │         │
+    │         │  1. aws ssm get-parameter (join-command)
+    │         │         └──► SSM Parameter Store ──► fetches join command
+    │         │  2. kubeadm join ──► joins cluster
+    │         │
+    └──► Admin EC2 (boots, runs admin-setup.sh)
+              │
+              │  1. aws ssm get-parameter (kubeconfig)
+              │         └──► SSM Parameter Store ──► fetches kubeconfig
+              │  2. saves to ~/.kube/config
+              │  3. copies to kubeadm-infra/.terraform/kubeconfig
+              │  4. terraform apply -var="deploy_argocd=true"
+              │         │                -target='module.argocd[0]'
+              │         │
+              │         ├──► Helm ──► ArgoCD deployed (NodePort 30082)
+              │         ├──► Helm ──► ingress-nginx deployed (NodePort 30080)
+              │         └──► kubectl apply ──► ArgoCD Application created
+              │                                (watches kubeadm-gitops repo)
+              │
+              └──► Cluster is fully ready
+```
+
+---
+
+### Phase 2 — CI/CD + GitOps Flow (every code push)
+
+```
+DEVELOPER
+─────────
+git push (k8s-app/** changed)
+    │
+    ▼
+GitHub Actions Pipeline
+    │
+    ├── SonarQube SAST ──► scan source code
+    ├── Hadolint       ──► scan Dockerfiles
+    ├── Docker Build   ──► build images (SHA tagged)
+    ├── Trivy          ──► scan container images
+    ├── Docker Push    ──► Docker Hub
+    │       └── ibrahimalish/go-backend:<sha>
+    │       └── ibrahimalish/node-frontend:<sha>
+    ├── OWASP ZAP      ──► DAST scan live frontend
+    ├── DefectDojo     ──► upload all scan reports
+    └── Kustomize Deploy
+            │
+            └──► kustomize edit set image go-backend:<sha>
+                 kustomize edit set image node-frontend:<sha>
+                        │
+                        ▼
+                 kubeadm-gitops repo
+                 k8s-app/overlays/production/kustomization.yaml updated
+                        │
+                        ▼ (ArgoCD polls every 3 mins)
+                 ArgoCD detects change
+                        │
+                        ├── kustomize build base + overlay
+                        ├── renders final manifests
+                        └── syncs cluster (rolling update, zero downtime)
+```
+
+---
+
+### Phase 3 — Runtime Traffic Flow
+
+```
+                         INTERNET
+                             │
+               ┌─────────────▼──────────────────┐
+               │     Network Load Balancer        │
+               │       (public subnet)            │
+               │  internal = false                │
+               │  DNS: k8s-nlb-xxxx.amazonaws.com │
+               └──────┬─────────────┬────────────┘
+                      │             │
+                   :80 │             │ :8080
+                      │             │
+          ┌───────────▼─────────────▼──────────────────┐
+          │              Private Subnet                  │
+          │                                             │
+          │  Worker Node                                │
+          │  ┌──────────────────────────────────────┐  │
+          │  │  :30080 ingress-nginx                 │  │
+          │  │      ├── /api/* ──► go-backend:8080   │  │
+          │  │      └── /      ──► react-frontend:80 │  │
+          │  │                                       │  │
+          │  │  :30082 ArgoCD server                 │  │
+          │  │      └── ArgoCD UI                    │  │
+          │  └──────────────────────────────────────┘  │
+          │                                             │
+          │  Admin EC2                                  │
+          │  ┌──────────────────────────────────────┐  │
+          │  │  kubectl ──► API Server :6443         │  │
+          │  │  (SSM access only)                    │  │
+          │  └──────────────────────────────────────┘  │
+          │                                             │
+          │  Control Plane :6443 (API Server)           │
+          └─────────────────────┬───────────────────────┘
+                                │
+               ┌────────────────▼───────────────┐
+               │          NAT Gateway            │
+               │        (outbound only)          │
+               └────────────────┬───────────────┘
+                                │
+                          Internet (outbound)
+                                │
+               ┌────────────────▼──────────────────────┐
+               │  ArgoCD ──► github.com/kubeadm-gitops  │
+               │  Nodes  ──► apt, Docker Hub, AWS APIs  │
+               │  SSM    ──► ssm.us-east-1.amazonaws.com│
+               └───────────────────────────────────────┘
+```
+
+---
+
 ## Two-Stage Terraform
 
 The K8s API server is a private IP unreachable from your laptop, so Terraform deployment is split:
