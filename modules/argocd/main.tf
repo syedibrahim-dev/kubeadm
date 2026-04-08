@@ -31,6 +31,7 @@ resource "null_resource" "argocd_application" {
     gitops_repo_url = var.gitops_repo_url
     gitops_branch   = var.gitops_branch
     app_namespace   = var.app_namespace
+    gitops_path     = var.gitops_path
   }
 
   provisioner "local-exec" {
@@ -51,7 +52,7 @@ resource "null_resource" "argocd_application" {
         source:
           repoURL: ${var.gitops_repo_url}
           targetRevision: ${var.gitops_branch}
-          path: k8s-app/k8s
+          path: ${var.gitops_path}
         destination:
           server: https://kubernetes.default.svc
           namespace: ${var.app_namespace}

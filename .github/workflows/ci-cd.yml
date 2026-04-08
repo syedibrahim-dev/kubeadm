@@ -395,29 +395,34 @@ jobs:
           token: ${{ secrets.GITOPS_TOKEN }}
           path: gitops-repo
 
-      - name: Update image tags in manifests
+      - name: Install kustomize
         run: |
-          cd gitops-repo
-          sed -i "s|${{ secrets.DOCKERHUB_USERNAME }}/go-backend:.*|${{ secrets.DOCKERHUB_USERNAME }}/go-backend:${{ github.sha }}|" \
-            k8s-app/k8s/03-go-backend.yaml
-          sed -i "s|${{ secrets.DOCKERHUB_USERNAME }}/node-frontend:.*|${{ secrets.DOCKERHUB_USERNAME }}/node-frontend:${{ github.sha }}|" \
-            k8s-app/k8s/04-react-frontend.yaml
+          curl -sLo /tmp/kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.3.0/kustomize_v5.3.0_linux_amd64.tar.gz
+          tar -xzf /tmp/kustomize.tar.gz -C /usr/local/bin/
+          kustomize version
 
-          echo "Updated manifests:"
-          grep 'image:' k8s-app/k8s/03-go-backend.yaml
-          grep 'image:' k8s-app/k8s/04-react-frontend.yaml
+      - name: Update image tags in kustomization
+        run: |
+          cd gitops-repo/k8s-app/overlays/production
+          kustomize edit set image \
+            ${{ secrets.DOCKERHUB_USERNAME }}/go-backend:${{ github.sha }} \
+            ${{ secrets.DOCKERHUB_USERNAME }}/node-frontend:${{ github.sha }}
 
-      - name: Commit and push updated manifests
+          echo "Updated kustomization.yaml:"
+          cat kustomization.yaml
+
+      - name: Commit and push updated kustomization
         run: |
           cd gitops-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s-app/k8s/03-go-backend.yaml k8s-app/k8s/04-react-frontend.yaml
+          git add k8s-app/overlays/production/kustomization.yaml
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "deploy: update images to ${{ github.sha }}
 
           Automated deployment from kubeadm@${{ github.sha }}
-          
+
           Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           git push
 

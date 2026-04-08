@@ -21,3 +21,9 @@ variable "app_namespace" {
   type        = string
   default     = "test-app"
 }
+
+variable "gitops_path" {
+  description = "Path inside the GitOps repository that ArgoCD watches"
+  type        = string
+  default     = "k8s-app/overlays/production"
+}

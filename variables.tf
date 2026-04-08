@@ -95,6 +95,12 @@ variable "gitops_branch" {
   default     = "main"
 }
 
+variable "gitops_path" {
+  description = "Path inside the GitOps repository that ArgoCD watches"
+  type        = string
+  default     = "k8s-app/overlays/production"
+}
+
 variable "app_namespace" {
   description = "Namespace where application will be deployed"
   type        = string

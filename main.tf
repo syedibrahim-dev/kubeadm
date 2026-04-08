@@ -75,5 +75,6 @@ module "argocd" {
 
   gitops_repo_url = var.gitops_repo_url
   gitops_branch   = var.gitops_branch
+  gitops_path     = var.gitops_path
   app_namespace   = var.app_namespace
 }
