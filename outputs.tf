@@ -55,50 +55,47 @@ output "worker_count" {
 #   value       = module.argocd.argocd_application_name
 # }
 
-output "nlb_dns_name" {
-  description = "Public DNS name of the NLB — use this to access the app and ArgoCD"
-  value       = module.nlb.nlb_dns_name
-}
-
-output "app_url" {
-  description = "Application URL (via ingress-nginx through NLB)"
-  value       = "http://${module.nlb.nlb_dns_name}"
-}
-
-output "argocd_url" {
-  description = "ArgoCD UI URL (via NLB, no port-forwarding needed)"
-  value       = "http://${module.nlb.nlb_dns_name}:8080"
+output "app_url_command" {
+  description = "Command to get the NLB DNS name provisioned by AWS CCM for ingress-nginx"
+  value       = "kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
 }
 
 output "argocd_access_info" {
   description = "How to access ArgoCD after deployment"
   value       = <<-EOT
-    
+
     ═══════════════════════════════════════════════════════════
     ARGOCD ACCESS (After Auto-Deployment)
     ═══════════════════════════════════════════════════════════
-    
-    ArgoCD is automatically deployed on the admin instance via Terraform.
-    
-    To check status:
-      aws ssm start-session --target ${module.admin.admin_instance_id}
-      sudo tail -f /var/log/argocd-deploy.log
-    
-    Once deployed, access ArgoCD:
-    
-    1. Get ArgoCD admin password:
-       kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
-    
-    2. Port forward to ArgoCD server:
-       kubectl port-forward svc/argocd-server -n argocd 8443:443
-    
-    3. Access ArgoCD UI:
-       https://localhost:8443
-       Username: admin
-       Password: <from step 1>
-    
-    4. Check application sync status:
+
+    ArgoCD is an admin tool — access it via port-forward from the admin EC2.
+
+    1. Connect to admin EC2:
+       aws ssm start-session --target ${module.admin.admin_instance_id}
+
+    2. Port-forward ArgoCD (run on admin EC2):
+       kubectl port-forward svc/argocd-server -n argocd 8080:80
+
+    3. In a second SSM session, use SSM port forwarding to reach it locally:
+       aws ssm start-session --target ${module.admin.admin_instance_id} \
+         --document-name AWS-StartPortForwardingSession \
+         --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
+       Then open: http://localhost:8080
+
+    4. Get ArgoCD admin password:
+       kubectl -n argocd get secret argocd-initial-admin-secret \
+         -o jsonpath='{.data.password}' | base64 -d
+
+    5. Check application sync status:
        kubectl get application k8s-app -n argocd
+
+    ═══════════════════════════════════════════════════════════
+    APP ACCESS (via CCM-provisioned NLB)
+    ═══════════════════════════════════════════════════════════
+
+    Get the NLB DNS name (available ~2 min after ingress-nginx deploys):
+      kubectl get svc -n ingress-nginx ingress-nginx-controller \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
   EOT
 }
 

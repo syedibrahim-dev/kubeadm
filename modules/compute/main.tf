@@ -22,6 +22,73 @@ resource "aws_iam_role" "control_plane_role" {
   }
 }
 
+# IAM Policy for Control Plane — AWS Cloud Controller Manager permissions
+# CCM needs these to provision NLBs, manage security group rules, etc.
+resource "aws_iam_role_policy" "control_plane_ccm_policy" {
+  name = "${var.control_plane_name}-ccm-policy"
+  role = aws_iam_role.control_plane_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "autoscaling:DescribeAutoScalingGroups",
+          "autoscaling:DescribeLaunchConfigurations",
+          "autoscaling:DescribeTags",
+          "ec2:DescribeInstances",
+          "ec2:DescribeRegions",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVolumes",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeVpcs",
+          "ec2:CreateSecurityGroup",
+          "ec2:CreateTags",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:DeleteSecurityGroup",
+          "ec2:CreateRoute",
+          "ec2:DeleteRoute",
+          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:AttachLoadBalancerToSubnets",
+          "elasticloadbalancing:ApplySecurityGroupsToLoadBalancer",
+          "elasticloadbalancing:CreateLoadBalancer",
+          "elasticloadbalancing:CreateLoadBalancerListeners",
+          "elasticloadbalancing:ConfigureHealthCheck",
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:DeleteLoadBalancerListeners",
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DetachLoadBalancerFromSubnets",
+          "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+          "elasticloadbalancing:SetLoadBalancerPoliciesForBackendServer",
+          "elasticloadbalancing:CreateListener",
+          "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeLoadBalancerPolicies",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:ModifyListener",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:RegisterTargets",
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:SetLoadBalancerPoliciesOfListener",
+          "iam:CreateServiceLinkedRole",
+          "kms:DescribeKey"
+        ]
+        Resource = ["*"]
+      }
+    ]
+  })
+}
+
 # IAM Policy for Control Plane (SSM Write)
 resource "aws_iam_role_policy" "control_plane_ssm_policy" {
   name = "${var.control_plane_name}-ssm-policy"
@@ -136,8 +203,9 @@ resource "aws_instance" "control_plane" {
   }) : null
 
   tags = {
-    Name = var.control_plane_name
-    Role = "control-plane"
+    Name                                    = var.control_plane_name
+    Role                                    = "control-plane"
+    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
   }
 }
 
@@ -167,7 +235,8 @@ resource "aws_instance" "worker" {
   }) : null
 
   tags = {
-    Name = "${var.worker_name}-${count.index + 1}"
-    Role = "worker"
+    Name                                    = "${var.worker_name}-${count.index + 1}"
+    Role                                    = "worker"
+    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
   }
 }

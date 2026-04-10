@@ -86,13 +86,38 @@ systemctl enable containerd
 # Wait for system to be ready
 sleep 10
 
-# Initialize Kubernetes cluster
+# Configure kubelet to use external cloud provider (AWS CCM)
+echo 'KUBELET_EXTRA_ARGS="--cloud-provider=external"' > /etc/default/kubelet
+systemctl daemon-reload
+
+# Initialize Kubernetes cluster with external cloud provider
 CONTROL_PLANE_IP="${control_plane_ip}"
-kubeadm init \
-  --control-plane-endpoint "$CONTROL_PLANE_IP" \
-  --pod-network-cidr=192.168.0.0/16 \
-  --apiserver-advertise-address="$CONTROL_PLANE_IP" \
-  --apiserver-cert-extra-sans="127.0.0.1,localhost"
+cat > /tmp/kubeadm-init-config.yaml << EOF
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: stable
+controlPlaneEndpoint: "$CONTROL_PLANE_IP"
+networking:
+  podSubnet: "192.168.0.0/16"
+apiServer:
+  extraArgs:
+    cloud-provider: external
+  certSANs:
+    - "127.0.0.1"
+    - "localhost"
+    - "$CONTROL_PLANE_IP"
+controllerManager:
+  extraArgs:
+    cloud-provider: external
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+nodeRegistration:
+  kubeletExtraArgs:
+    cloud-provider: external
+EOF
+
+kubeadm init --config /tmp/kubeadm-init-config.yaml
 
 # Configure kubectl for ubuntu user
 mkdir -p /home/ubuntu/.kube
@@ -105,6 +130,27 @@ cp /etc/kubernetes/admin.conf /root/.kube/config
 
 # Install Calico CNI
 kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://docs.projectcalico.org/manifests/calico.yaml
+
+# Install Helm
+echo "Installing Helm..."
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Deploy AWS Cloud Controller Manager
+# CCM watches for Service type:LoadBalancer and automatically provisions NLBs.
+# Must be deployed before workers join so the uninitialized taint is removed promptly.
+echo "Deploying AWS Cloud Controller Manager..."
+helm repo add aws-cloud-controller-manager https://kubernetes.github.io/cloud-provider-aws
+helm repo update
+helm upgrade --install aws-cloud-controller-manager \
+  aws-cloud-controller-manager/aws-cloud-controller-manager \
+  --namespace kube-system \
+  --kubeconfig=/etc/kubernetes/admin.conf \
+  --set args[0]="--v=2" \
+  --set args[1]="--cloud-provider=aws" \
+  --set args[2]="--cluster-name=kubeadm-cluster" \
+  --set args[3]="--configure-cloud-routes=false"
+
+echo "AWS CCM deployed successfully."
 
 # Generate join command and save it
 kubeadm token create --print-join-command > /home/ubuntu/join-command.sh
