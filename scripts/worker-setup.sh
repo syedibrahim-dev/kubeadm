@@ -139,6 +139,10 @@ if [ -z "$JOIN_COMMAND" ] || [ "$JOIN_COMMAND" == "None" ]; then
   exit 1
 fi
 
+# Configure kubelet to use external cloud provider (AWS CCM) before joining
+echo 'KUBELET_EXTRA_ARGS="--cloud-provider=external"' > /etc/default/kubelet
+systemctl daemon-reload
+
 # Execute the join command
 echo "Joining the Kubernetes cluster..."
 bash -c "$JOIN_COMMAND"

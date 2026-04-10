@@ -46,23 +46,15 @@ resource "aws_security_group" "k8s_nodes_sg" {
     description = "Allow all traffic between K8s nodes"
   }
 
-  # Allow NLB → ingress-nginx HTTP NodePort
-  # NLB does not have a security group; source IPs are client IPs (preserved by NLB)
+  # Allow NLB → NodePort range
+  # NLB preserves source IPs (no security group of its own), so we allow all.
+  # CCM will also dynamically manage rules in this range for LoadBalancer services.
   ingress {
-    from_port   = 30080
-    to_port     = 30080
+    from_port   = 30000
+    to_port     = 32767
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow NLB traffic to ingress-nginx HTTP NodePort"
-  }
-
-  # Allow NLB → ArgoCD server NodePort
-  ingress {
-    from_port   = 30082
-    to_port     = 30082
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow NLB traffic to ArgoCD NodePort"
+    description = "Allow NLB traffic to Kubernetes NodePort range"
   }
 
   # Allow all outbound traffic (for SSM agent, downloading packages via NAT)
@@ -75,6 +67,7 @@ resource "aws_security_group" "k8s_nodes_sg" {
   }
 
   tags = {
-    Name = "k8s-nodes-sg"
+    Name                                    = "k8s-nodes-sg"
+    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
   }
 }

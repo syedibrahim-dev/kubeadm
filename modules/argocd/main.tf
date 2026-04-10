@@ -77,20 +77,16 @@ resource "helm_release" "ingress_nginx" {
   create_namespace = true
   version          = "4.11.3"
 
+  # AWS CCM provisions an NLB automatically when it sees type: LoadBalancer.
+  # The annotation tells CCM to use NLB (Layer 4) instead of CLB (classic).
   set {
     name  = "controller.service.type"
-    value = "NodePort"
-  }
-
-  # Fixed NodePorts so the NLB target group always hits the right port
-  set {
-    name  = "controller.service.nodePorts.http"
-    value = "30080"
+    value = "LoadBalancer"
   }
 
   set {
-    name  = "controller.service.nodePorts.https"
-    value = "30443"
+    name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
+    value = "nlb"
   }
 
   depends_on = [var.cluster_ready]
