@@ -14,6 +14,11 @@ output "argocd_application_name" {
 }
 
 output "ingress_nginx_namespace" {
-  description = "Namespace where Ingress NGINX is deployed"
+  description = "Namespace where public Ingress NGINX is deployed"
   value       = helm_release.ingress_nginx.namespace
+}
+
+output "ingress_nginx_internal_namespace" {
+  description = "Namespace where internal Ingress NGINX is deployed"
+  value       = helm_release.ingress_nginx_internal.namespace
 }

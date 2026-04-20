@@ -219,6 +219,40 @@ while true; do
     elapsed=$((elapsed + 15))
 done
 
+# Wait for AWS CCM to initialize all nodes (removes uninitialized taint)
+# Until CCM clears this taint, Helm pre-install hook pods cannot be scheduled.
+echo "Waiting for AWS CCM to initialize all nodes..."
+ccm_wait=300
+ccm_elapsed=0
+while kubectl get nodes -o json 2>/dev/null | grep -q "node.cloudprovider.kubernetes.io/uninitialized"; do
+    if [ $ccm_elapsed -ge $ccm_wait ]; then
+        echo "WARNING: CCM initialization timed out after $${ccm_wait}s. Proceeding anyway..."
+        break
+    fi
+
+    # Print diagnostics every 30s so we know what's blocking
+    if [ $(( ccm_elapsed % 30 )) -eq 0 ]; then
+        echo "--- CCM pod status ---"
+        kubectl get pods -n kube-system -l k8s-app=aws-cloud-controller-manager 2>/dev/null || true
+        CCM_POD=$(kubectl get pods -n kube-system -l k8s-app=aws-cloud-controller-manager \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+        if [ -n "$CCM_POD" ]; then
+            echo "--- CCM pod events ---"
+            kubectl describe pod -n kube-system "$CCM_POD" 2>/dev/null | grep -A 20 "^Events:" || true
+            echo "--- CCM logs ---"
+            kubectl logs -n kube-system "$CCM_POD" --tail=15 2>/dev/null || true
+        fi
+        echo "--- Node taints ---"
+        kubectl get nodes -o custom-columns="NAME:.metadata.name,TAINTS:.spec.taints" 2>/dev/null || true
+        echo "---"
+    fi
+
+    echo "Waiting for CCM to clear uninitialized taint... ($${ccm_elapsed}s elapsed)"
+    sleep 15
+    ccm_elapsed=$((ccm_elapsed + 15))
+done
+echo "All nodes initialized by CCM. Ready for Helm deployments."
+
 # Run ArgoCD Terraform deployment (Stage 2 — inside VPC, can reach API server)
 echo ""
 echo "Deploying ArgoCD via Terraform (Stage 2)..."

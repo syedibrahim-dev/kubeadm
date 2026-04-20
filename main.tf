@@ -66,3 +66,39 @@ module "argocd" {
   gitops_path     = var.gitops_path
   app_namespace   = var.app_namespace
 }
+
+# Pre-destroy cleanup — fires automatically on terraform destroy BEFORE EC2s are terminated.
+# CCM creates NLBs outside Terraform state so Terraform can't delete them directly.
+# This sends an SSM command to the admin EC2 to delete the LoadBalancer services,
+# which triggers CCM to delete the NLBs. Without this, VPC/subnet destruction
+# hangs indefinitely because AWS won't delete a subnet with an NLB still attached.
+resource "null_resource" "pre_destroy_nlb_cleanup" {
+  triggers = {
+    admin_instance_id = module.admin.admin_instance_id
+    aws_region        = var.aws_region
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      echo "Pre-destroy: deleting LoadBalancer services so CCM can remove NLBs..."
+      COMMAND_ID=$(aws ssm send-command \
+        --instance-ids "${self.triggers.admin_instance_id}" \
+        --document-name "AWS-RunShellScript" \
+        --parameters '{"commands":["kubectl delete svc -n ingress-nginx ingress-nginx-controller --ignore-not-found=true","kubectl delete svc -n ingress-nginx-internal ingress-nginx-internal-controller --ignore-not-found=true"]}' \
+        --region "${self.triggers.aws_region}" \
+        --query "Command.CommandId" \
+        --output text 2>/dev/null) || true
+
+      if [ -n "$COMMAND_ID" ] && [ "$COMMAND_ID" != "None" ]; then
+        echo "SSM command sent ($COMMAND_ID). Waiting 60s for CCM to delete NLBs..."
+        sleep 60
+      else
+        echo "Could not reach admin EC2 via SSM — skipping NLB cleanup."
+      fi
+      echo "Pre-destroy cleanup done."
+    EOT
+  }
+
+  depends_on = [module.admin, module.compute]
+}

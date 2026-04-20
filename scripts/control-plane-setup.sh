@@ -86,8 +86,23 @@ systemctl enable containerd
 # Wait for system to be ready
 sleep 10
 
-# Configure kubelet to use external cloud provider (AWS CCM)
-echo 'KUBELET_EXTRA_ARGS="--cloud-provider=external"' > /etc/default/kubelet
+# Construct the full private DNS FQDN that CCM uses to match nodes to EC2 instances.
+# AWS CCM searches DescribeInstances with filter private-dns-name=<node-name> (exact match).
+# The EC2 private DNS is always ip-X-X-X-X.ec2.internal (us-east-1) or
+# ip-X-X-X-X.REGION.compute.internal (all other regions).
+# We build it explicitly so we're not dependent on what local-hostname returns.
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+SHORT_HOSTNAME="ip-$(echo $PRIVATE_IP | tr '.' '-')"
+if [ "$REGION" = "us-east-1" ]; then
+    PRIVATE_DNS="$${SHORT_HOSTNAME}.ec2.internal"
+else
+    PRIVATE_DNS="$${SHORT_HOSTNAME}.$${REGION}.compute.internal"
+fi
+echo "Control plane private DNS (constructed): $PRIVATE_DNS"
+
+# Configure kubelet with external cloud provider and correct hostname
+echo "KUBELET_EXTRA_ARGS=\"--cloud-provider=external --hostname-override=$PRIVATE_DNS\"" > /etc/default/kubelet
 systemctl daemon-reload
 
 # Initialize Kubernetes cluster with external cloud provider
@@ -95,7 +110,6 @@ CONTROL_PLANE_IP="${control_plane_ip}"
 cat > /tmp/kubeadm-init-config.yaml << EOF
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
-kubernetesVersion: stable
 controlPlaneEndpoint: "$CONTROL_PLANE_IP"
 networking:
   podSubnet: "192.168.0.0/16"
@@ -113,8 +127,10 @@ controllerManager:
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: InitConfiguration
 nodeRegistration:
+  name: "$PRIVATE_DNS"
   kubeletExtraArgs:
     cloud-provider: external
+    hostname-override: "$PRIVATE_DNS"
 EOF
 
 kubeadm init --config /tmp/kubeadm-init-config.yaml
@@ -131,26 +147,126 @@ cp /etc/kubernetes/admin.conf /root/.kube/config
 # Install Calico CNI
 kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://docs.projectcalico.org/manifests/calico.yaml
 
-# Install Helm
-echo "Installing Helm..."
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
 # Deploy AWS Cloud Controller Manager
 # CCM watches for Service type:LoadBalancer and automatically provisions NLBs.
 # Must be deployed before workers join so the uninitialized taint is removed promptly.
+# Key: tolerations must include node.cloudprovider.kubernetes.io/uninitialized
+# so CCM itself can start even when nodes have that taint (chicken-and-egg fix).
 echo "Deploying AWS Cloud Controller Manager..."
-helm repo add aws-cloud-controller-manager https://kubernetes.github.io/cloud-provider-aws
-helm repo update
-helm upgrade --install aws-cloud-controller-manager \
-  aws-cloud-controller-manager/aws-cloud-controller-manager \
-  --namespace kube-system \
-  --kubeconfig=/etc/kubernetes/admin.conf \
-  --set args[0]="--v=2" \
-  --set args[1]="--cloud-provider=aws" \
-  --set args[2]="--cluster-name=kubeadm-cluster" \
-  --set args[3]="--configure-cloud-routes=false"
+kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f - <<'EOF'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cloud-controller-manager
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:cloud-controller-manager
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["nodes/status"]
+    verbs: ["patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["services/status"]
+    verbs: ["patch", "update"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["create", "get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "get", "list", "watch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:cloud-controller-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:cloud-controller-manager
+subjects:
+  - kind: ServiceAccount
+    name: cloud-controller-manager
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: system:cloud-controller-manager:extension-apiserver-authentication-reader
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: cloud-controller-manager
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: aws-cloud-controller-manager
+  namespace: kube-system
+  labels:
+    k8s-app: aws-cloud-controller-manager
+spec:
+  selector:
+    matchLabels:
+      k8s-app: aws-cloud-controller-manager
+  template:
+    metadata:
+      labels:
+        k8s-app: aws-cloud-controller-manager
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+      hostNetwork: true
+      serviceAccountName: cloud-controller-manager
+      priorityClassName: system-cluster-critical
+      containers:
+        - name: aws-cloud-controller-manager
+          image: registry.k8s.io/provider-aws/cloud-controller-manager:v1.31.1
+          args:
+            - --v=2
+            - --cloud-provider=aws
+            - --cluster-name=kubeadm-cluster
+            - --configure-cloud-routes=false
+          resources:
+            requests:
+              cpu: 200m
+              memory: 128Mi
+EOF
 
-echo "AWS CCM deployed successfully."
+echo "AWS CCM deployed. Waiting for it to start..."
+kubectl --kubeconfig=/etc/kubernetes/admin.conf rollout status daemonset/aws-cloud-controller-manager -n kube-system --timeout=120s || true
 
 # Generate join command and save it
 kubeadm token create --print-join-command > /home/ubuntu/join-command.sh
