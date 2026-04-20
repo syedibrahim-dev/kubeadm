@@ -1,6 +1,6 @@
 # Private Kubernetes Cluster on AWS — DevSecOps
 
-A fully automated, private Kubernetes cluster on AWS provisioned with Terraform and kubeadm. Features GitOps deployment via ArgoCD, a public NLB for direct access, and a security-focused CI/CD pipeline with Kustomize-based deployments.
+A fully automated, private Kubernetes cluster on AWS provisioned with Terraform and kubeadm. Features GitOps deployment via ArgoCD, AWS CCM-provisioned NLBs, and a security-focused CI/CD pipeline.
 
 ---
 
@@ -10,23 +10,31 @@ A fully automated, private Kubernetes cluster on AWS provisioned with Terraform 
                         Internet
                             │
               ┌─────────────▼──────────────┐
-              │   Network Load Balancer     │
-              │       (public subnet)       │
-              │   :80   → app              │
-              │   :8080 → ArgoCD UI        │
+              │     Public NLB (CCM)        │  ← app traffic only
+              │       port 80               │
+              └─────────────┬──────────────┘
+                            │
+              ┌─────────────▼──────────────┐
+              │   ingress-nginx (public)    │
+              │   routes: / → app           │
               └─────────────┬──────────────┘
                             │
               ┌─────────────▼──────────────────────────────┐
-              │              Private Subnet                 │
-              │                                            │
-              │  ┌──────────────┐  ┌─────────────────────┐ │
-              │  │  Admin EC2   │  │   K8s Worker Node   │ │
-              │  │  (kubectl)   │  │  :30080 ingress-nginx│ │
-              │  └──────┬───────┘  │  :30082 ArgoCD      │ │
-              │         │          └─────────────────────┘ │
+              │              Private Subnet                  │
+              │                                             │
+              │  ┌─────────────┐   ┌─────────────────────┐ │
+              │  │  Admin EC2  │   │   K8s Worker Node   │ │
+              │  │  (kubectl)  │   │   (app pods)        │ │
+              │  └──────┬──────┘   └─────────────────────┘ │
+              │         │                                   │
               │  ┌──────▼───────────────────────────────┐  │
               │  │        K8s Control Plane             │  │
               │  │        (10.0.10.100:6443)            │  │
+              │  └──────────────────────────────────────┘  │
+              │                                             │
+              │  ┌──────────────────────────────────────┐  │
+              │  │   Internal NLB (CCM) — VPC only       │  │
+              │  │   ingress-nginx-internal → ArgoCD    │  │
               │  └──────────────────────────────────────┘  │
               └────────────────────────────────────────────┘
                             │
@@ -37,9 +45,10 @@ A fully automated, private Kubernetes cluster on AWS provisioned with Terraform 
 ```
 
 - All EC2 instances are in a **private subnet** — no public IPs
-- Node access is via **AWS SSM Session Manager** only — no SSH, no bastion
+- Node access is via **AWS SSM Session Manager** only — no SSH, no open ports
 - The Kubernetes API server is reachable **only from the admin EC2** (security group enforced)
-- The NLB exposes the app and ArgoCD UI publicly — no port-forwarding needed
+- **Two CCM-provisioned NLBs**: public (app) and internal (ArgoCD)
+- ArgoCD is **not internet-facing** — accessed via SSM tunnel through the admin EC2
 
 ---
 
@@ -52,13 +61,14 @@ YOUR LAPTOP
 ───────────
 terraform apply
     │
-    ├──► AWS VPC + Subnets + NAT Gateway + Security Groups + NLB
+    ├──► AWS VPC + Subnets + NAT Gateway + Security Groups
     │
     ├──► Control Plane EC2 (boots, runs control-plane-setup.sh)
     │         │
     │         │  1. kubeadm init + Calico CNI
-    │         │  2. base64 encode kubeconfig
-    │         │  3. aws ssm put-parameter
+    │         │  2. Deploy AWS CCM (DaemonSet) — manages NLB lifecycle
+    │         │  3. base64 encode kubeconfig
+    │         │  4. aws ssm put-parameter
     │         │         └──► SSM Parameter Store
     │         │               ├── /k8s/K8s-Control-Plane/kubeconfig
     │         │               └── /k8s/K8s-Control-Plane/join-command
@@ -66,22 +76,21 @@ terraform apply
     ├──► Worker EC2 (boots, runs worker-setup.sh)
     │         │
     │         │  1. aws ssm get-parameter (join-command)
-    │         │         └──► SSM Parameter Store ──► fetches join command
     │         │  2. kubeadm join ──► joins cluster
     │         │
     └──► Admin EC2 (boots, runs admin-setup.sh)
               │
               │  1. aws ssm get-parameter (kubeconfig)
-              │         └──► SSM Parameter Store ──► fetches kubeconfig
               │  2. saves to ~/.kube/config
               │  3. copies to kubeadm-infra/.terraform/kubeconfig
-              │  4. terraform apply -var="deploy_argocd=true"
-              │         │                -target='module.argocd[0]'
+              │  4. waits for all nodes Ready
+              │  5. waits for CCM to clear uninitialized taint
+              │  6. terraform apply -var="deploy_argocd=true"
               │         │
-              │         ├──► Helm ──► ArgoCD deployed (NodePort 30082)
-              │         ├──► Helm ──► ingress-nginx deployed (NodePort 30080)
-              │         └──► kubectl apply ──► ArgoCD Application created
-              │                                (watches kubeadm-gitops repo)
+              │         ├──► Helm ──► ArgoCD (ClusterIP)
+              │         ├──► Helm ──► ingress-nginx (public NLB via CCM)
+              │         ├──► Helm ──► ingress-nginx-internal (internal NLB via CCM)
+              │         └──► kubectl apply ──► ArgoCD Application CR + Ingress
               │
               └──► Cluster is fully ready
 ```
@@ -103,8 +112,8 @@ GitHub Actions Pipeline
     ├── Docker Build   ──► build images (SHA tagged)
     ├── Trivy          ──► scan container images
     ├── Docker Push    ──► Docker Hub
-    │       └── ibrahimalish/go-backend:<sha>
-    │       └── ibrahimalish/node-frontend:<sha>
+    │       └── <user>/go-backend:<sha>
+    │       └── <user>/node-frontend:<sha>
     ├── OWASP ZAP      ──► DAST scan live frontend
     ├── DefectDojo     ──► upload all scan reports
     └── Kustomize Deploy
@@ -119,8 +128,6 @@ GitHub Actions Pipeline
                         ▼ (ArgoCD polls every 3 mins)
                  ArgoCD detects change
                         │
-                        ├── kustomize build base + overlay
-                        ├── renders final manifests
                         └── syncs cluster (rolling update, zero downtime)
 ```
 
@@ -132,48 +139,48 @@ GitHub Actions Pipeline
                          INTERNET
                              │
                ┌─────────────▼──────────────────┐
-               │     Network Load Balancer        │
-               │       (public subnet)            │
-               │  internal = false                │
-               │  DNS: k8s-nlb-xxxx.amazonaws.com │
-               └──────┬─────────────┬────────────┘
-                      │             │
-                   :80 │             │ :8080
-                      │             │
-          ┌───────────▼─────────────▼──────────────────┐
-          │              Private Subnet                  │
-          │                                             │
-          │  Worker Node                                │
-          │  ┌──────────────────────────────────────┐  │
-          │  │  :30080 ingress-nginx                 │  │
-          │  │      ├── /api/* ──► go-backend:8080   │  │
-          │  │      └── /      ──► react-frontend:80 │  │
-          │  │                                       │  │
-          │  │  :30082 ArgoCD server                 │  │
-          │  │      └── ArgoCD UI                    │  │
-          │  └──────────────────────────────────────┘  │
-          │                                             │
-          │  Admin EC2                                  │
-          │  ┌──────────────────────────────────────┐  │
-          │  │  kubectl ──► API Server :6443         │  │
-          │  │  (SSM access only)                    │  │
-          │  └──────────────────────────────────────┘  │
-          │                                             │
-          │  Control Plane :6443 (API Server)           │
-          └─────────────────────┬───────────────────────┘
-                                │
-               ┌────────────────▼───────────────┐
-               │          NAT Gateway            │
-               │        (outbound only)          │
-               └────────────────┬───────────────┘
-                                │
-                          Internet (outbound)
-                                │
-               ┌────────────────▼──────────────────────┐
-               │  ArgoCD ──► github.com/kubeadm-gitops  │
-               │  Nodes  ──► apt, Docker Hub, AWS APIs  │
-               │  SSM    ──► ssm.us-east-1.amazonaws.com│
-               └───────────────────────────────────────┘
+               │    Public NLB (CCM-provisioned)  │
+               │    port 80 — app traffic only    │
+               └──────────────┬─────────────────┘
+                              │
+               ┌──────────────▼─────────────────┐
+               │     ingress-nginx (public)      │
+               │     / ──► app pods              │
+               └─────────────────────────────────┘
+
+
+               VPC-ONLY (not internet-routable)
+               ┌─────────────────────────────────┐
+               │  Internal NLB (CCM-provisioned) │
+               │  port 80 — ArgoCD only          │
+               └──────────────┬─────────────────┘
+                              │
+               ┌──────────────▼─────────────────┐
+               │  ingress-nginx-internal         │
+               │  / ──► argocd-server            │
+               └─────────────────────────────────┘
+
+               Developers reach ArgoCD via SSM tunnel:
+               laptop ──► SSM ──► admin EC2 ──► internal NLB
+```
+
+---
+
+## AWS Cloud Controller Manager (CCM)
+
+CCM runs as a DaemonSet on the control plane and manages the NLB lifecycle automatically:
+
+- When `ingress-nginx` creates a `Service type: LoadBalancer`, CCM calls the AWS API to provision an NLB
+- When the service is deleted, CCM deletes the NLB
+- The `service.beta.kubernetes.io/aws-load-balancer-internal: "true"` annotation tells CCM to provision a VPC-internal NLB (no public IP)
+
+**Important — before running `terraform destroy`**, delete the LoadBalancer services first so CCM can clean up the NLBs. Otherwise the VPC subnet deletion will hang:
+
+```bash
+# Run on admin EC2 BEFORE terraform destroy
+kubectl delete svc ingress-nginx-controller -n ingress-nginx
+kubectl delete svc ingress-nginx-internal-controller -n ingress-nginx-internal
+# Wait ~30s then run terraform destroy from your laptop
 ```
 
 ---
@@ -184,9 +191,10 @@ The K8s API server is a private IP unreachable from your laptop, so Terraform de
 
 **Stage 1 — run once from your laptop:**
 ```bash
+terraform init
 terraform apply
 ```
-Creates VPC, subnets, NAT gateway, security groups, NLB, and all EC2 instances.
+Creates VPC, subnets, NAT gateway, security groups, and all EC2 instances.
 
 **Stage 2 — runs automatically on the admin EC2 via cloud-init:**
 
@@ -200,62 +208,6 @@ The admin EC2 is inside the VPC so it can reach `10.0.10.100:6443` — Helm and 
 
 ---
 
-## Kubernetes Bootstrap
-
-Fully automated via `user_data` scripts — no manual steps:
-
-| Component | Script | What it does |
-|-----------|--------|--------------|
-| Control Plane | `control-plane-setup.sh` | `kubeadm init`, installs Calico CNI, uploads kubeconfig + join command to SSM Parameter Store |
-| Workers | `worker-setup.sh` | Reads join command from SSM, runs `kubeadm join` automatically |
-| Admin | `admin-setup.sh` | Installs kubectl, fetches kubeconfig from SSM, runs Stage 2 Terraform |
-
----
-
-## GitOps with Kustomize
-
-Two repositories:
-
-| Repo | Purpose |
-|------|---------|
-| `kubeadm` (this repo) | App source, Dockerfiles, CI/CD pipeline, Terraform infra |
-| `kubeadm-gitops` | Kubernetes manifests managed by ArgoCD |
-
-**GitOps repo structure:**
-```
-kubeadm-gitops/k8s-app/
-├── base/                        # Shared manifests (never edited by CI/CD)
-│   ├── 01-namespace.yaml
-│   ├── 02-mongodb-hostpath.yaml
-│   ├── 03-go-backend.yaml
-│   ├── 04-react-frontend.yaml
-│   ├── 05-ingress.yaml
-│   └── kustomization.yaml
-└── overlays/
-    └── production/
-        └── kustomization.yaml   ← CI/CD only ever touches this file
-```
-
-**Deployment flow:**
-```
-Developer pushes to k8s-app/ in kubeadm
-         │
-         ▼
-GitHub Actions pipeline
-  → SonarQube, Hadolint, Trivy, ZAP scans
-  → builds & pushes SHA-tagged images to Docker Hub
-  → kustomize edit set image → updates overlays/production/kustomization.yaml
-         │
-         ▼
-ArgoCD detects kustomization change
-  → renders base + overlay
-  → syncs cluster (rolling update, zero downtime)
-```
-
-The pipeline only ever modifies one file (`kustomization.yaml`) instead of sed-patching raw YAML manifests.
-
----
-
 ## Project Structure
 
 ```
@@ -263,7 +215,7 @@ kubeadm/
 ├── main.tf                        # Root module — wires all modules together
 ├── variables.tf                   # All input variables
 ├── providers.tf                   # AWS, Helm, Kubernetes, Null providers
-├── outputs.tf                     # NLB DNS, instance IDs, access URLs
+├── outputs.tf                     # Instance IDs, NLB hostnames, access info
 ├── data.tf                        # Data sources (AMI, AZs)
 ├── config/
 │   └── terraform.tfvars           # Variable values
@@ -271,15 +223,14 @@ kubeadm/
 ├── modules/
 │   ├── vpc/                       # VPC, public/private subnets, NAT gateway
 │   ├── security/                  # Security groups for K8s nodes and admin
-│   ├── compute/                   # EC2: control plane + workers, IAM roles
+│   ├── compute/                   # EC2: control plane + workers, IAM roles + CCM policy
 │   ├── admin/                     # Admin EC2 — kubectl gateway, runs Stage 2
-│   ├── nlb/                       # Public NLB → ingress-nginx + ArgoCD NodePorts
-│   └── argocd/                    # ArgoCD + ingress-nginx via Helm (Stage 2 only)
+│   └── argocd/                    # ArgoCD + ingress-nginx (public + internal) via Helm
 │
 ├── scripts/
-│   ├── control-plane-setup.sh     # kubeadm init, uploads kubeconfig to SSM
+│   ├── control-plane-setup.sh     # kubeadm init, CCM deploy, uploads kubeconfig to SSM
 │   ├── worker-setup.sh            # kubeadm join via SSM Parameter Store
-│   └── admin-setup.sh             # kubectl setup + Stage 2 ArgoCD deployment
+│   └── admin-setup.sh             # kubectl setup + CCM taint wait + Stage 2 deployment
 │
 ├── k8s-app/
 │   ├── backend/                   # Go REST API (CRUD + health), MongoDB
@@ -310,25 +261,12 @@ terraform init
 terraform apply
 ```
 
-After apply completes, Terraform prints the access URLs:
-```
-app_url    = "http://k8s-nlb-xxxx.elb.amazonaws.com"
-argocd_url = "http://k8s-nlb-xxxx.elb.amazonaws.com:8080"
-```
-
 Allow 10-15 minutes for full cluster bootstrap and ArgoCD deployment.
 
 **Monitor progress:**
 ```bash
 aws ssm start-session --target <admin_instance_id> --region us-east-1
-
-sudo tail -f /var/log/admin-setup.log    # Stage 1 bootstrap
-sudo tail -f /var/log/argocd-deploy.log  # Stage 2 ArgoCD Terraform
-```
-
-**Retry Stage 2 manually if needed:**
-```bash
-sudo -u ubuntu bash /home/ubuntu/deploy-argocd.sh
+sudo tail -f /var/log/admin-setup.log
 ```
 
 ---
@@ -337,16 +275,35 @@ sudo -u ubuntu bash /home/ubuntu/deploy-argocd.sh
 
 ### Application
 ```
-http://<nlb_dns>/
+http://<public-NLB-DNS>/
+```
+
+Get the public NLB DNS (on admin EC2):
+```bash
+kubectl get svc -n ingress-nginx ingress-nginx-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
 ### ArgoCD UI
-```
-http://<nlb_dns>:8080
+
+ArgoCD is on an internal NLB — not internet-accessible. Access via SSM tunnel:
+
+```bash
+# Step 1 — get internal NLB DNS (on admin EC2)
+kubectl get svc -n ingress-nginx-internal ingress-nginx-internal-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+# Step 2 — open SSM tunnel (on your laptop)
+aws ssm start-session --target <admin_instance_id> \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters '{"host":["<internal-NLB-DNS>"],"portNumber":["80"],"localPortNumber":["8080"]}'
+
+# Step 3 — open in browser
+http://localhost:8080
 Username: admin
 ```
 
-Get the admin password (on admin instance):
+Get the admin password (on admin EC2):
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath='{.data.password}' | base64 -d
@@ -364,17 +321,22 @@ kubectl get pods -A
 
 ## Destroy
 
+**Always delete LoadBalancer services first** — CCM creates NLBs outside Terraform state. If you skip this, the VPC subnet deletion will hang indefinitely.
+
 ```bash
+# Step 1 — on admin EC2
+kubectl delete svc ingress-nginx-controller -n ingress-nginx
+kubectl delete svc ingress-nginx-internal-controller -n ingress-nginx-internal
+
+# Step 2 — wait ~30s for CCM to delete the NLBs, then on your laptop
 terraform destroy
 ```
-
-Helm/Kubernetes providers may log connection warnings during destroy — safe to ignore, all AWS resources are removed.
 
 ---
 
 ## CI/CD Pipeline
 
-Triggers on pushes to `main` (or PRs) that modify `k8s-app/**` or the workflow file. Terraform and infra changes do not trigger it.
+Triggers on pushes to `main` (or PRs) that modify `k8s-app/**` or the workflow file.
 
 | Step | Tool | Type | Blocks pipeline? |
 |------|------|------|-----------------|
@@ -426,5 +388,6 @@ docker compose -f defectdojo/docker-compose.yml down
 | No bastion | AWS SSM Session Manager — IAM-authenticated, CloudTrail-logged |
 | API server isolation | Only admin EC2 security group can reach port 6443 |
 | Worker join | Automated via SSM Parameter Store — no manual token handling |
-| Public exposure | NLB on ports 80 (app) and 8080 (ArgoCD) only |
+| ArgoCD isolation | Internal NLB only — not internet-facing, accessed via SSM tunnel |
+| Public exposure | Public NLB port 80 (app only) — ArgoCD never exposed publicly |
 | GitOps | Pull-based (ArgoCD pulls from GitHub) — nothing pushes into the cluster |

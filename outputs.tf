@@ -43,32 +43,20 @@ output "worker_count" {
   value       = module.compute.worker_count
 }
 
-# ArgoCD Information (only available after admin instance deploys it)
-# These outputs will be visible when running terraform on the admin instance
-# output "argocd_namespace" {
-#   description = "Namespace where ArgoCD is deployed"
-#   value       = module.argocd.argocd_namespace
-# }
-# 
-# output "argocd_application" {
-#   description = "ArgoCD application name managing the k8s-app"
-#   value       = module.argocd.argocd_application_name
-# }
+output "public_nlb_hostname" {
+  description = "Public NLB DNS for app traffic"
+  value       = var.deploy_argocd ? module.argocd[0].public_nlb_hostname : "Available after Stage 2 (deploy_argocd=true)"
+}
 
-output "app_url_command" {
-  description = "Commands to get NLB DNS names after CCM provisions them (~1-2 min after ingress-nginx deploys)"
-  value       = <<-EOT
-    # Public NLB (app traffic):
-    kubectl get svc -n ingress-nginx ingress-nginx-controller \
-      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+output "internal_nlb_hostname" {
+  description = "Internal NLB DNS for ArgoCD (VPC-only)"
+  value       = var.deploy_argocd ? module.argocd[0].internal_nlb_hostname : "Available after Stage 2 (deploy_argocd=true)"
+}
 
-    # Internal NLB (ArgoCD — VPC-only):
-    kubectl get svc -n ingress-nginx-internal ingress-nginx-internal-controller \
-      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-
-    # App URL:    http://<public-NLB-DNS>/
-    # ArgoCD URL: http://<internal-NLB-DNS>/argocd  (only reachable from within VPC)
-  EOT
+output "argocd_admin_password" {
+  description = "ArgoCD initial admin password"
+  value       = var.deploy_argocd ? module.argocd[0].argocd_admin_password : "Available after Stage 2 (deploy_argocd=true)"
+  sensitive   = true
 }
 
 output "argocd_access_info" {
@@ -94,7 +82,7 @@ output "argocd_access_info" {
         --parameters '{"host":["<internal-NLB-DNS>"],"portNumber":["80"],"localPortNumber":["8080"]}'
 
     Step 3 — Open in browser:
-      http://localhost:8080/argocd
+      http://localhost:8080
 
     Step 4 — Get ArgoCD admin password (run on admin EC2):
       kubectl -n argocd get secret argocd-initial-admin-secret \
@@ -112,7 +100,6 @@ output "argocd_access_info" {
   EOT
 }
 
-
 output "setup_instructions" {
   description = "Quick setup instructions"
   value = (var.enable_auto_setup ? <<-EOT
@@ -123,10 +110,10 @@ output "setup_instructions" {
 
     Admin Instance ID: ${module.admin.admin_instance_id}
     Admin Instance IP: ${module.admin.admin_private_ip}
-    
+
     Control Plane ID: ${module.compute.control_plane_id}
     Control Plane IP: ${module.compute.control_plane_private_ip}
-    
+
     Worker Count: ${module.compute.worker_count}
     Worker IPs: ${join(", ", module.compute.worker_private_ip)}
 
@@ -143,33 +130,18 @@ output "setup_instructions" {
       ${format("aws ssm start-session --target %s --region %s", module.admin.admin_instance_id, var.aws_region)}
 
     Run kubectl commands (kubeconfig already configured):
-      
+
       Switch to ubuntu user (recommended):
         sudo su - ubuntu
         kubectl get nodes
         kubectl get pods -A
-        kubectl create deployment nginx --image=nginx
-      
+
       Or use sudo directly:
         sudo kubectl get nodes
         sudo kubectl get pods -A
 
     Monitor admin setup logs:
       sudo tail -f /var/log/admin-setup.log
-
-    ═══════════════════════════════════════════════════════════
-    DEPLOY YOUR APPLICATION
-    ═══════════════════════════════════════════════════════════
-
-    The cluster is set up with automatic deployment!
-    
-    - ArgoCD is automatically installed
-    - Application manifests are synced from: ${var.github_repo}
-    - GitOps pipeline updates image tags in kubeadm-gitops repo
-    
-    To manually re-deploy (if needed):
-      ${format("aws ssm start-session --target %s --region %s", module.admin.admin_id, var.aws_region)}
-      cd ~/k8s-app && bash deploy.sh
 
     ═══════════════════════════════════════════════════════════
     EMERGENCY DIRECT ACCESS TO NODES (via SSM)
@@ -189,4 +161,3 @@ output "setup_instructions" {
   EOT
   )
 }
-
