@@ -25,6 +25,30 @@ resource "helm_release" "argocd" {
   depends_on = [var.cluster_ready]
 }
 
+data "kubernetes_service" "ingress_nginx_public" {
+  metadata {
+    name      = "ingress-nginx-controller"
+    namespace = "ingress-nginx"
+  }
+  depends_on = [helm_release.ingress_nginx]
+}
+
+data "kubernetes_service" "ingress_nginx_internal" {
+  metadata {
+    name      = "ingress-nginx-internal-controller"
+    namespace = "ingress-nginx-internal"
+  }
+  depends_on = [helm_release.ingress_nginx_internal]
+}
+
+data "kubernetes_secret" "argocd_admin_password" {
+  metadata {
+    name      = "argocd-initial-admin-secret"
+    namespace = "argocd"
+  }
+  depends_on = [helm_release.argocd]
+}
+
 resource "null_resource" "argocd_application" {
   triggers = {
     gitops_repo_url = var.gitops_repo_url
