@@ -17,7 +17,6 @@ resource "helm_release" "argocd" {
       configs = {
         params = {
           "server.insecure" = true
-          "server.rootpath" = "/argocd"
         }
       }
     })
@@ -78,7 +77,7 @@ resource "null_resource" "argocd_application" {
         rules:
         - http:
             paths:
-            - path: /argocd
+            - path: /
               pathType: Prefix
               backend:
                 service:
