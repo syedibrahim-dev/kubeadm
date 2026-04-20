@@ -139,22 +139,60 @@ if [ -z "$JOIN_COMMAND" ] || [ "$JOIN_COMMAND" == "None" ]; then
   exit 1
 fi
 
-# Configure kubelet to use external cloud provider (AWS CCM) before joining
-echo 'KUBELET_EXTRA_ARGS="--cloud-provider=external"' > /etc/default/kubelet
+# Construct the full private DNS FQDN that CCM uses to match nodes to EC2 instances.
+# AWS CCM searches DescribeInstances with filter private-dns-name=<node-name> (exact match).
+# The EC2 private DNS is always ip-X-X-X-X.ec2.internal (us-east-1) or
+# ip-X-X-X-X.REGION.compute.internal (all other regions).
+# We build it explicitly so we're not dependent on what local-hostname returns.
+PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+SHORT_HOSTNAME="ip-$(echo $PRIVATE_IP | tr '.' '-')"
+if [ "$REGION" = "us-east-1" ]; then
+    PRIVATE_DNS="$${SHORT_HOSTNAME}.ec2.internal"
+else
+    PRIVATE_DNS="$${SHORT_HOSTNAME}.$${REGION}.compute.internal"
+fi
+echo "Worker private DNS (constructed): $PRIVATE_DNS"
+
+# Configure kubelet with external cloud provider and correct hostname
+echo "KUBELET_EXTRA_ARGS=\"--cloud-provider=external --hostname-override=$PRIVATE_DNS\"" > /etc/default/kubelet
 systemctl daemon-reload
 
-# Execute the join command
-echo "Joining the Kubernetes cluster..."
-bash -c "$JOIN_COMMAND"
+# Parse token, API endpoint, and CA hash from the raw join command
+# so we can build a kubeadm join config with the correct node name.
+API_ENDPOINT=$(echo "$JOIN_COMMAND" | grep -oP '(?<=join )\S+')
+TOKEN=$(echo "$JOIN_COMMAND" | grep -oP '(?<=--token )\S+')
+CA_HASH=$(echo "$JOIN_COMMAND" | grep -oP '(?<=--discovery-token-ca-cert-hash )\S+')
 
-if [ $? -eq 0 ]; then
-  echo "Successfully joined the Kubernetes cluster!"
-  echo "Worker node setup completed at $(date)" > /home/ubuntu/k8s-cluster-join-complete.txt
-  chown ubuntu:ubuntu /home/ubuntu/k8s-cluster-join-complete.txt
-else
-  echo "ERROR: Failed to join the cluster."
+if [ -z "$API_ENDPOINT" ] || [ -z "$TOKEN" ] || [ -z "$CA_HASH" ]; then
+  echo "ERROR: Failed to parse join command. Raw value:"
+  echo "$JOIN_COMMAND"
   exit 1
 fi
+
+cat > /tmp/kubeadm-join-config.yaml << EOF
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+nodeRegistration:
+  name: "$PRIVATE_DNS"
+  kubeletExtraArgs:
+    cloud-provider: external
+    hostname-override: "$PRIVATE_DNS"
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: $API_ENDPOINT
+    token: $TOKEN
+    caCertHashes:
+      - $CA_HASH
+EOF
+
+# Execute the join command
+echo "Joining the Kubernetes cluster as $PRIVATE_DNS..."
+kubeadm join --config /tmp/kubeadm-join-config.yaml
+
+echo "Successfully joined the Kubernetes cluster!"
+echo "Worker node setup completed at $(date)" > /home/ubuntu/k8s-cluster-join-complete.txt
+chown ubuntu:ubuntu /home/ubuntu/k8s-cluster-join-complete.txt
 echo "To join this node, SSH to the control plane, get the join command:"
 echo "  cat /home/ubuntu/join-command.sh"
 echo "Then SSH to this worker and run that command."
