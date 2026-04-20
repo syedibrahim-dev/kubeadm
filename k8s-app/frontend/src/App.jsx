@@ -95,7 +95,7 @@ export default function App() {
 
       {/* ── Header ── */}
       <div style={s.header}>
-        <h1 style={s.h1}>☸️ K8s Item Manager</h1>
+        <h1 style={s.h1}>☸️ K8s Item Manager v2</h1>
         {health && (
           <span style={s.badge(isHealthy)}>
             API: {health.status} &nbsp;|&nbsp; DB: {health.database}
