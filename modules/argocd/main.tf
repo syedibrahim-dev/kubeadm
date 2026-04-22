@@ -54,6 +54,9 @@ resource "helm_release" "aws_lbc" {
         create = true
         name   = "aws-load-balancer-controller"
       }
+      enableShield = false
+      enableWaf    = false
+      enableWafv2  = false
     })
   ]
 
