@@ -26,6 +26,14 @@ resource "helm_release" "argocd" {
   depends_on = [var.cluster_ready]
 }
 
+# Look up the VPC by tag — avoids a module dependency that would force VPC creation
+# when running Stage 2 (terraform apply -target='module.argocd[0]') on admin EC2.
+data "aws_vpc" "cluster" {
+  tags = {
+    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+  }
+}
+
 # AWS Load Balancer Controller — single controller that provisions ALBs from Ingress resources.
 # Replaces two separate ingress-nginx controllers.
 # Uses EC2 instance profile for AWS API access (no IRSA needed for non-EKS).
@@ -41,7 +49,7 @@ resource "helm_release" "aws_lbc" {
     yamlencode({
       clusterName = var.cluster_name
       region      = var.aws_region
-      vpcId       = var.vpc_id
+      vpcId       = data.aws_vpc.cluster.id
       serviceAccount = {
         create = true
         name   = "aws-load-balancer-controller"

@@ -65,7 +65,6 @@ module "argocd" {
   gitops_branch   = var.gitops_branch
   gitops_path     = var.gitops_path
   app_namespace   = var.app_namespace
-  vpc_id          = module.vpc.vpc_id
   aws_region      = var.aws_region
   cluster_name    = "kubeadm-cluster"
 }

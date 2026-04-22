@@ -1,8 +1,3 @@
-variable "vpc_id" {
-  description = "VPC ID — required by AWS Load Balancer Controller"
-  type        = string
-}
-
 variable "aws_region" {
   description = "AWS region — required by AWS Load Balancer Controller"
   type        = string
