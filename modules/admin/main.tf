@@ -60,6 +60,7 @@ resource "aws_iam_role_policy" "admin_terraform_policy" {
         Effect = "Allow"
         Action = [
           "ec2:DescribeVpcs",
+          "ec2:DescribeVpcAttribute",
           "ec2:DescribeSubnets",
           "ec2:DescribeInstances",
           "ec2:DescribeSecurityGroups"
