@@ -2,10 +2,13 @@
 module "vpc" {
   source = "./modules/vpc"
 
-  vpc_cidr            = var.vpc.vpc_cidr
-  public_subnet_cidr  = var.vpc.public_subnet_cidr
-  private_subnet_cidr = var.vpc.private_subnet_cidr
-  availability_zone   = data.aws_availability_zones.available.names[0]
+  vpc_cidr              = var.vpc.vpc_cidr
+  public_subnet_cidr    = var.vpc.public_subnet_cidr
+  private_subnet_cidr   = var.vpc.private_subnet_cidr
+  availability_zone     = data.aws_availability_zones.available.names[0]
+  public_subnet_2_cidr  = var.vpc.public_subnet_2_cidr
+  private_subnet_2_cidr = var.vpc.private_subnet_2_cidr
+  availability_zone_2   = data.aws_availability_zones.available.names[1]
 }
 
 # Security Module - Creates security groups

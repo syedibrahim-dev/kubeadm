@@ -71,6 +71,33 @@ resource "aws_nat_gateway" "k8s_nat" {
   depends_on = [aws_internet_gateway.k8s_igw]
 }
 
+# Second Public Subnet in AZ2 — ALB requires subnets in at least 2 AZs
+resource "aws_subnet" "public_2" {
+  vpc_id                  = aws_vpc.k8s_vpc.id
+  cidr_block              = var.public_subnet_2_cidr
+  availability_zone       = var.availability_zone_2
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name                                    = "k8s-public-subnet-2"
+    "kubernetes.io/role/elb"                = "1"
+    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+  }
+}
+
+# Second Private Subnet in AZ2 — ALB requires subnets in at least 2 AZs
+resource "aws_subnet" "private_2" {
+  vpc_id            = aws_vpc.k8s_vpc.id
+  cidr_block        = var.private_subnet_2_cidr
+  availability_zone = var.availability_zone_2
+
+  tags = {
+    Name                                    = "k8s-private-subnet-2"
+    "kubernetes.io/role/internal-elb"       = "1"
+    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+  }
+}
+
 # Route Table for Public Subnet
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.k8s_vpc.id
@@ -108,5 +135,16 @@ resource "aws_route_table_association" "public" {
 # Associate Private Route Table with Private Subnet
 resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private.id
+  route_table_id = aws_route_table.private.id
+}
+
+# Associate route tables with AZ2 subnets
+resource "aws_route_table_association" "public_2" {
+  subnet_id      = aws_subnet.public_2.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "private_2" {
+  subnet_id      = aws_subnet.private_2.id
   route_table_id = aws_route_table.private.id
 }
