@@ -43,14 +43,9 @@ output "worker_count" {
   value       = module.compute.worker_count
 }
 
-output "public_nlb_hostname" {
-  description = "Public NLB DNS for app traffic"
-  value       = var.deploy_argocd ? module.argocd[0].public_nlb_hostname : "Available after Stage 2 (deploy_argocd=true)"
-}
-
-output "internal_nlb_hostname" {
-  description = "Internal NLB DNS for ArgoCD (VPC-only)"
-  value       = var.deploy_argocd ? module.argocd[0].internal_nlb_hostname : "Available after Stage 2 (deploy_argocd=true)"
+output "internal_alb_hostname" {
+  description = "Internal ALB DNS for ArgoCD (VPC-only)"
+  value       = var.deploy_argocd ? module.argocd[0].internal_alb_hostname : "Available after Stage 2 (deploy_argocd=true)"
 }
 
 output "argocd_admin_password" {
@@ -64,22 +59,20 @@ output "argocd_access_info" {
   value       = <<-EOT
 
     ═══════════════════════════════════════════════════════════
-    ARGOCD ACCESS (via SSM bastion tunnel)
+    ARGOCD ACCESS (via SSM tunnel to internal ALB)
     ═══════════════════════════════════════════════════════════
 
-    ArgoCD is on an internal NLB — not reachable from the internet.
-    Use the admin EC2 as a bastion to tunnel through.
+    ArgoCD is on an internal ALB — not reachable from the internet.
+    AWS Load Balancer Controller provisions it automatically from the Ingress resource.
 
-    Step 1 — Get the internal NLB DNS (run on admin EC2):
-      INTERNAL_NLB=$(kubectl get svc -n ingress-nginx-internal \
-        ingress-nginx-internal-controller \
-        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-      echo $INTERNAL_NLB
+    Step 1 — Get the internal ALB DNS (run on admin EC2):
+      kubectl get ingress argocd-server-ingress -n argocd \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
-    Step 2 — On your laptop, open an SSM tunnel to the internal NLB:
+    Step 2 — On your laptop, open an SSM tunnel to the internal ALB:
       aws ssm start-session --target ${module.admin.admin_instance_id} \
         --document-name AWS-StartPortForwardingSessionToRemoteHost \
-        --parameters '{"host":["<internal-NLB-DNS>"],"portNumber":["80"],"localPortNumber":["8080"]}'
+        --parameters '{"host":["<internal-ALB-DNS>"],"portNumber":["80"],"localPortNumber":["8080"]}'
 
     Step 3 — Open in browser:
       http://localhost:8080
@@ -89,14 +82,14 @@ output "argocd_access_info" {
         -o jsonpath='{.data.password}' | base64 -d
 
     ═══════════════════════════════════════════════════════════
-    APP ACCESS (public NLB, internet-facing)
+    APP ACCESS (public ALB, internet-facing)
     ═══════════════════════════════════════════════════════════
 
-    Get the public NLB DNS name (available ~2 min after ingress-nginx deploys):
-      kubectl get svc -n ingress-nginx ingress-nginx-controller \
+    Get the public ALB DNS (available ~2 min after AWS LBC provisions it):
+      kubectl get ingress app-ingress -n test-app \
         -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 
-    App URL: http://<public-NLB-DNS>/
+    App URL: http://<public-ALB-DNS>/
   EOT
 }
 

@@ -148,8 +148,10 @@ cp /etc/kubernetes/admin.conf /root/.kube/config
 kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://docs.projectcalico.org/manifests/calico.yaml
 
 # Deploy AWS Cloud Controller Manager
-# CCM watches for Service type:LoadBalancer and automatically provisions NLBs.
-# Must be deployed before workers join so the uninitialized taint is removed promptly.
+# CCM handles node lifecycle only: removes node.cloudprovider.kubernetes.io/uninitialized
+# taint, sets node labels (zone/region), and manages routes.
+# Load balancer provisioning is handled by AWS Load Balancer Controller (deployed in Stage 2).
+# Must deploy CCM before workers join so the uninitialized taint is removed promptly.
 # Key: tolerations must include node.cloudprovider.kubernetes.io/uninitialized
 # so CCM itself can start even when nodes have that taint (chicken-and-egg fix).
 echo "Deploying AWS Cloud Controller Manager..."
