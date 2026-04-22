@@ -1,124 +1,32 @@
 #!/bin/bash
-# Deploy script for React (nginx:alpine) + Go (distroless) + MongoDB on K8s
-# Includes Argo CD for GitOps-based continuous deployment
+# Manual deploy script — only needed if auto-deploy via Terraform/ArgoCD fails.
+# Under normal operation, admin-setup.sh runs Stage 2 Terraform automatically
+# which deploys ArgoCD + AWS Load Balancer Controller via Helm.
 
 set -e
 
-echo "🚀 Deploying React + Go + MongoDB on Kubernetes..."
-echo ""
+echo "Deploying ArgoCD + AWS Load Balancer Controller via Terraform (Stage 2)..."
 
-# ── NGINX Ingress Controller ──────────────────────────────────────────────────
-echo "📦 Installing NGINX Ingress Controller..."
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/baremetal/deploy.yaml
+cd /home/ubuntu/kubeadm-infra
 
-echo "⏳ Waiting for Ingress Controller..."
-kubectl wait --namespace ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=120s || true
+mkdir -p .terraform
+cp ~/.kube/config .terraform/kubeconfig
+chmod 600 .terraform/kubeconfig
 
-# ── Argo CD ───────────────────────────────────────────────────────────────────
-echo "📦 Installing Argo CD..."
-kubectl create namespace argocd 2>/dev/null || true
-kubectl apply -n argocd \
-  --server-side \
-  --force-conflicts \
-  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+terraform init
+terraform apply -var="deploy_argocd=true" -target='module.argocd[0]' -auto-approve
 
-echo "⏳ Waiting for Argo CD server..."
-kubectl wait --namespace argocd \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/name=argocd-server \
-  --timeout=180s || true
-
-# ── Argo CD Application (GitOps sync) ─────────────────────────────────────────
-# ArgoCD will manage all application manifests from the gitops repository
-# No need to manually apply k8s/*.yaml - ArgoCD handles deployment automatically
-echo "📦 Registering Argo CD Application (GitOps)..."
-kubectl apply -f argocd/argocd-app.yaml
-
-echo "⏳ Waiting for ArgoCD to sync application..."
-echo "   ArgoCD is now pulling manifests from: https://github.com/syedibrahim-dev/kubeadm-gitops.git"
-echo "   Path: k8s-app/k8s/"
-sleep 10  # Give ArgoCD time to detect the application
-
-# Trigger initial sync (in case auto-sync takes time)
-kubectl patch application k8s-app -n argocd --type=merge \
-  -p '{"operation":{"initiatedBy":{"username":"deploy-script"},"sync":{"revision":"main"}}}' \
-  2>/dev/null || echo "   (ArgoCD will sync automatically)"
-
-# ── Wait for rollouts ──────────────────────────────────────────────────────────
-echo " Waiting for MongoDB..."
-kubectl wait --namespace test-app \
-  --for=condition=ready pod \
-  --selector=app=mongodb \
-  --timeout=120s || true
-
-echo " Waiting for Go backend..."
-kubectl wait --namespace test-app \
-  --for=condition=ready pod \
-  --selector=app=go-backend \
-  --timeout=120s || true
-
-echo " Waiting for React frontend..."
-kubectl wait --namespace test-app \
-  --for=condition=ready pod \
-  --selector=app=react-frontend \
-  --timeout=120s || true
-
-# ── Status ────────────────────────────────────────────────────────────────────
 echo ""
-echo " Deployment complete!"
+echo "Deployment complete!"
 echo ""
-echo " Resource Status:"
-kubectl get all -n test-app
+echo "Get ArgoCD admin password:"
+echo "  kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
 echo ""
-echo " Ingress:"
-kubectl get ingress -n test-app
+echo "Get public ALB DNS (app):"
+echo "  kubectl get ingress app-ingress -n test-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
 echo ""
-echo " Image sizes (after multi-stage build):"
-echo "   go-backend:     ~20MB  (golang:1.22 builder → distroless/static)"
-echo "   react-frontend: ~15MB  (node:18 builder → nginx:alpine)"
+echo "Get internal ALB DNS (ArgoCD):"
+echo "  kubectl get ingress argocd-server-ingress -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
 echo ""
-echo " Access the application via SSM port forwarding:"
-echo ""
-echo "   Step 1 — Forward the ingress NodePort to localhost:"
-NODE_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null || echo "<NODEPORT>")
-CONTROL_PLANE_ID=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "<INSTANCE_ID>")
-echo "   aws ssm start-session --target <CONTROL_PLANE_INSTANCE_ID> \\"
-echo "     --document-name AWS-StartPortForwardingSession \\"
-echo "     --parameters 'portNumber=${NODE_PORT},localPortNumber=8080'"
-echo ""
-echo "   Step 2 — Add to /etc/hosts:"
-echo "   127.0.0.1  test-app.local"
-echo ""
-echo "   Step 3 — Open browser:"
-echo "   http://test-app.local:8080  →  React frontend"
-echo "   http://test-app.local:8080/api/health  →  Go backend health"
-echo "   http://test-app.local:8080/api/items   →  Items API"
-echo ""
-echo "🧪 Test the API:"
-echo "   curl http://localhost:8080/health"
-echo "   curl http://localhost:8080/items"
-echo ""
-echo "🔄 Argo CD (GitOps continuous deployment):"
-echo "   ✅ ArgoCD is watching: https://github.com/syedibrahim-dev/kubeadm-gitops.git"
-echo "   📂 Path: k8s-app/k8s/"
-echo "   🔄 Auto-sync: enabled (prune + self-heal)"
-echo ""
-echo "   When the CI/CD pipeline updates image tags in the gitops repo,"
-echo "   ArgoCD will automatically sync the cluster (rolling update, zero downtime)."
-echo ""
-echo "   Check ArgoCD sync status:"
-echo "   kubectl get application k8s-app -n argocd"
-echo ""
-echo "   Access the Argo CD dashboard:"
-echo "   kubectl port-forward svc/argocd-server -n argocd 8443:443"
-echo ""
-echo "   Get the initial admin password:"
-echo "   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
-echo ""
-echo "   Login: admin / <password from above>"
-echo ""
-echo "💡 Note: Application manifests are managed by ArgoCD from the gitops repo."
-echo "   Manual kubectl apply of k8s/*.yaml is not needed (ArgoCD handles it)."
+echo "Check ArgoCD application sync status:"
+echo "  kubectl get application k8s-app -n argocd"

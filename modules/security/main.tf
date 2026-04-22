@@ -46,15 +46,16 @@ resource "aws_security_group" "k8s_nodes_sg" {
     description = "Allow all traffic between K8s nodes"
   }
 
-  # Allow NLB → NodePort range
-  # NLB preserves source IPs (no security group of its own), so we allow all.
-  # CCM will also dynamically manage rules in this range for LoadBalancer services.
+  # Allow ALB → NodePort range (target-type: instance)
+  # AWS Load Balancer Controller provisions ALBs that forward to NodePorts on EC2.
+  # ALB manages its own security group and injects rules dynamically,
+  # but the base NodePort range must be open to allow health checks and traffic.
   ingress {
     from_port   = 30000
     to_port     = 32767
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow NLB traffic to Kubernetes NodePort range"
+    description = "Allow ALB traffic to Kubernetes NodePort range"
   }
 
   # Allow all outbound traffic (for SSM agent, downloading packages via NAT)

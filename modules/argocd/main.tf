@@ -1,3 +1,4 @@
+# ArgoCD — ClusterIP service, accessed via ALB through AWS LBC
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -25,20 +26,30 @@ resource "helm_release" "argocd" {
   depends_on = [var.cluster_ready]
 }
 
-data "kubernetes_service" "ingress_nginx_public" {
-  metadata {
-    name      = "ingress-nginx-controller"
-    namespace = "ingress-nginx"
-  }
-  depends_on = [helm_release.ingress_nginx]
-}
+# AWS Load Balancer Controller — single controller that provisions ALBs from Ingress resources.
+# Replaces two separate ingress-nginx controllers.
+# Uses EC2 instance profile for AWS API access (no IRSA needed for non-EKS).
+resource "helm_release" "aws_lbc" {
+  name             = "aws-load-balancer-controller"
+  repository       = "https://aws.github.io/eks-charts"
+  chart            = "aws-load-balancer-controller"
+  namespace        = "kube-system"
+  version          = "1.8.1"
+  timeout          = 600
 
-data "kubernetes_service" "ingress_nginx_internal" {
-  metadata {
-    name      = "ingress-nginx-internal-controller"
-    namespace = "ingress-nginx-internal"
-  }
-  depends_on = [helm_release.ingress_nginx_internal]
+  values = [
+    yamlencode({
+      clusterName = var.cluster_name
+      region      = var.aws_region
+      vpcId       = var.vpc_id
+      serviceAccount = {
+        create = true
+        name   = "aws-load-balancer-controller"
+      }
+    })
+  ]
+
+  depends_on = [var.cluster_ready]
 }
 
 data "kubernetes_secret" "argocd_admin_password" {
@@ -47,6 +58,14 @@ data "kubernetes_secret" "argocd_admin_password" {
     namespace = "argocd"
   }
   depends_on = [helm_release.argocd]
+}
+
+data "kubernetes_ingress_v1" "argocd" {
+  metadata {
+    name      = "argocd-server-ingress"
+    namespace = "argocd"
+  }
+  depends_on = [null_resource.argocd_application]
 }
 
 resource "null_resource" "argocd_application" {
@@ -58,7 +77,6 @@ resource "null_resource" "argocd_application" {
   }
 
   provisioner "local-exec" {
-    # Explicit KUBECONFIG so kubectl works regardless of shell environment
     environment = {
       KUBECONFIG = "/home/ubuntu/.kube/config"
     }
@@ -66,7 +84,10 @@ resource "null_resource" "argocd_application" {
     command = <<-EOT
       echo "Waiting for ArgoCD server to be ready..."
       kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
-      echo "ArgoCD server is ready. Applying Application CR and Ingress..."
+      echo "Waiting for AWS Load Balancer Controller to be ready..."
+      kubectl wait --for=condition=available --timeout=300s \
+        deployment/aws-load-balancer-controller -n kube-system
+      echo "Applying ArgoCD Application CR and Ingress..."
       kubectl apply -f - <<'EOF'
       apiVersion: argoproj.io/v1alpha1
       kind: Application
@@ -95,9 +116,11 @@ resource "null_resource" "argocd_application" {
         name: argocd-server-ingress
         namespace: argocd
         annotations:
-          nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+          alb.ingress.kubernetes.io/scheme: internal
+          alb.ingress.kubernetes.io/target-type: instance
+          alb.ingress.kubernetes.io/backend-protocol: HTTP
       spec:
-        ingressClassName: nginx-internal
+        ingressClassName: alb
         rules:
         - http:
             paths:
@@ -112,72 +135,5 @@ resource "null_resource" "argocd_application" {
     EOT
   }
 
-  depends_on = [helm_release.argocd, helm_release.ingress_nginx_internal]
-}
-
-# Public ingress-nginx — internet-facing NLB, serves app traffic only
-resource "helm_release" "ingress_nginx" {
-  name             = "ingress-nginx"
-  repository       = "https://kubernetes.github.io/ingress-nginx"
-  chart            = "ingress-nginx"
-  namespace        = "ingress-nginx"
-  create_namespace = true
-  version          = "4.11.3"
-  timeout          = 600
-
-  values = [
-    yamlencode({
-      controller = {
-        ingressClassResource = {
-          name            = "nginx"
-          enabled         = true
-          default         = false
-          controllerValue = "k8s.io/ingress-nginx"
-        }
-        service = {
-          type = "LoadBalancer"
-          annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
-          }
-        }
-      }
-    })
-  ]
-
-  depends_on = [var.cluster_ready]
-}
-
-# Internal ingress-nginx — VPC-only NLB, serves admin tools (ArgoCD, etc.)
-# The aws-load-balancer-internal annotation tells CCM to provision an internal NLB
-# (no public IP, only reachable from within the VPC).
-resource "helm_release" "ingress_nginx_internal" {
-  name             = "ingress-nginx-internal"
-  repository       = "https://kubernetes.github.io/ingress-nginx"
-  chart            = "ingress-nginx"
-  namespace        = "ingress-nginx-internal"
-  create_namespace = true
-  version          = "4.11.3"
-  timeout          = 600
-
-  values = [
-    yamlencode({
-      controller = {
-        ingressClassResource = {
-          name            = "nginx-internal"
-          enabled         = true
-          default         = false
-          controllerValue = "k8s.io/ingress-nginx-internal"
-        }
-        service = {
-          type = "LoadBalancer"
-          annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-type"     = "nlb"
-            "service.beta.kubernetes.io/aws-load-balancer-internal" = "true"
-          }
-        }
-      }
-    })
-  ]
-
-  depends_on = [var.cluster_ready]
+  depends_on = [helm_release.argocd, helm_release.aws_lbc]
 }

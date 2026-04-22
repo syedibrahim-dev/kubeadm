@@ -22,16 +22,18 @@ resource "aws_iam_role" "control_plane_role" {
   }
 }
 
-# IAM Policy for Control Plane — AWS Cloud Controller Manager permissions
-# CCM needs these to provision NLBs, manage security group rules, etc.
+# IAM Policy for Control Plane — CCM (node lifecycle) + AWS Load Balancer Controller
+# CCM: node taints, labels, route management
+# LBC: provisions ALBs/NLBs from Ingress resources (replaces manual NLB management)
 resource "aws_iam_role_policy" "control_plane_ccm_policy" {
-  name = "${var.control_plane_name}-ccm-policy"
+  name = "${var.control_plane_name}-ccm-lbc-policy"
   role = aws_iam_role.control_plane_role.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        # CCM — node lifecycle management
         Effect = "Allow"
         Action = [
           "autoscaling:DescribeAutoScalingGroups",
@@ -45,42 +47,64 @@ resource "aws_iam_role_policy" "control_plane_ccm_policy" {
           "ec2:DescribeVolumes",
           "ec2:DescribeAvailabilityZones",
           "ec2:DescribeVpcs",
+          "ec2:DescribeInternetGateways",
+          "ec2:CreateRoute",
+          "ec2:DeleteRoute"
+        ]
+        Resource = ["*"]
+      },
+      {
+        # AWS Load Balancer Controller — ALB/NLB lifecycle from Ingress resources
+        Effect = "Allow"
+        Action = [
           "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
           "ec2:CreateTags",
+          "ec2:DeleteTags",
           "ec2:AuthorizeSecurityGroupIngress",
           "ec2:RevokeSecurityGroupIngress",
-          "ec2:DeleteSecurityGroup",
-          "ec2:CreateRoute",
-          "ec2:DeleteRoute",
+          "ec2:DescribeAccountAttributes",
+          "ec2:DescribeAddresses",
+          "ec2:DescribeCoipPools",
+          "ec2:GetCoipPoolUsage",
           "elasticloadbalancing:AddTags",
-          "elasticloadbalancing:AttachLoadBalancerToSubnets",
-          "elasticloadbalancing:ApplySecurityGroupsToLoadBalancer",
+          "elasticloadbalancing:RemoveTags",
           "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:CreateLoadBalancerListeners",
-          "elasticloadbalancing:ConfigureHealthCheck",
           "elasticloadbalancing:DeleteLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancerListeners",
           "elasticloadbalancing:DescribeLoadBalancers",
           "elasticloadbalancing:DescribeLoadBalancerAttributes",
-          "elasticloadbalancing:DetachLoadBalancerFromSubnets",
-          "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
           "elasticloadbalancing:ModifyLoadBalancerAttributes",
-          "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
-          "elasticloadbalancing:SetLoadBalancerPoliciesForBackendServer",
+          "elasticloadbalancing:SetIpAddressType",
+          "elasticloadbalancing:SetSecurityGroups",
+          "elasticloadbalancing:SetSubnets",
           "elasticloadbalancing:CreateListener",
-          "elasticloadbalancing:CreateTargetGroup",
           "elasticloadbalancing:DeleteListener",
-          "elasticloadbalancing:DeleteTargetGroup",
           "elasticloadbalancing:DescribeListeners",
-          "elasticloadbalancing:DescribeLoadBalancerPolicies",
-          "elasticloadbalancing:DescribeTargetGroups",
-          "elasticloadbalancing:DescribeTargetHealth",
           "elasticloadbalancing:ModifyListener",
+          "elasticloadbalancing:CreateRule",
+          "elasticloadbalancing:DeleteRule",
+          "elasticloadbalancing:DescribeRules",
+          "elasticloadbalancing:ModifyRule",
+          "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetHealth",
           "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroupAttributes",
           "elasticloadbalancing:RegisterTargets",
           "elasticloadbalancing:DeregisterTargets",
-          "elasticloadbalancing:SetLoadBalancerPoliciesOfListener",
+          "elasticloadbalancing:DescribeTags",
+          "elasticloadbalancing:DescribeListenerCertificates",
+          "elasticloadbalancing:AddListenerCertificates",
+          "elasticloadbalancing:RemoveListenerCertificates",
           "iam:CreateServiceLinkedRole",
+          "tag:GetResources",
+          "tag:TagResources",
+          "tag:UntagResources",
+          "acm:ListCertificates",
+          "acm:DescribeCertificate",
+          "cognito-idp:DescribeUserPoolClient",
           "kms:DescribeKey"
         ]
         Resource = ["*"]
@@ -145,6 +169,74 @@ resource "aws_iam_role" "worker_role" {
   tags = {
     Name = "${var.worker_name}-role"
   }
+}
+
+# IAM Policy for Worker Nodes — LBC permissions (LBC pod can run on any node)
+resource "aws_iam_role_policy" "worker_lbc_policy" {
+  name = "${var.worker_name}-lbc-policy"
+  role = aws_iam_role.worker_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:DescribeRegions",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeVpcs",
+          "ec2:DescribeInternetGateways",
+          "ec2:DescribeAvailabilityZones",
+          "ec2:DescribeAccountAttributes",
+          "ec2:DescribeAddresses",
+          "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
+          "ec2:CreateTags",
+          "ec2:DeleteTags",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupIngress",
+          "elasticloadbalancing:AddTags",
+          "elasticloadbalancing:RemoveTags",
+          "elasticloadbalancing:CreateLoadBalancer",
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:ModifyLoadBalancerAttributes",
+          "elasticloadbalancing:SetIpAddressType",
+          "elasticloadbalancing:SetSecurityGroups",
+          "elasticloadbalancing:SetSubnets",
+          "elasticloadbalancing:CreateListener",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:ModifyListener",
+          "elasticloadbalancing:CreateRule",
+          "elasticloadbalancing:DeleteRule",
+          "elasticloadbalancing:DescribeRules",
+          "elasticloadbalancing:ModifyRule",
+          "elasticloadbalancing:CreateTargetGroup",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:RegisterTargets",
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:DescribeTags",
+          "iam:CreateServiceLinkedRole",
+          "tag:GetResources",
+          "tag:TagResources",
+          "tag:UntagResources",
+          "acm:ListCertificates",
+          "acm:DescribeCertificate",
+          "kms:DescribeKey"
+        ]
+        Resource = ["*"]
+      }
+    ]
+  })
 }
 
 # IAM Policy for Worker Nodes (SSM Read)
