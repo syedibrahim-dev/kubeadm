@@ -12,7 +12,7 @@ resource "helm_release" "argocd" {
     yamlencode({
       server = {
         service = {
-          type = "ClusterIP"
+          type = "NodePort"
         }
       }
       configs = {
