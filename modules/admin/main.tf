@@ -34,9 +34,37 @@ resource "aws_iam_role_policy" "admin_ssm_policy" {
         Effect = "Allow"
         Action = [
           "ssm:GetParameter",
-          "ssm:GetParameters"
+          "ssm:GetParameters",
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation"
         ]
-        Resource = "arn:aws:ssm:*:*:parameter/k8s/*"
+        Resource = [
+          "arn:aws:ssm:*:*:parameter/k8s/*",
+          "arn:aws:ssm:*::document/AWS-RunShellScript",
+          "arn:aws:ec2:*:*:instance/*"
+        ]
+      }
+    ]
+  })
+}
+
+# IAM Policy for Stage 2 Terraform — data source lookups needed by argocd module
+resource "aws_iam_role_policy" "admin_terraform_policy" {
+  name = "${var.admin_name}-terraform-policy"
+  role = aws_iam_role.admin_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeVpcs",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeInstances",
+          "ec2:DescribeSecurityGroups"
+        ]
+        Resource = ["*"]
       }
     ]
   })
