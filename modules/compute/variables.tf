@@ -67,3 +67,8 @@ variable "nat_gateway_id" {
   description = "NAT Gateway ID for explicit dependency - ensures NAT is ready before instances start"
   type        = string
 }
+
+variable "cluster_name" {
+  description = "Kubernetes cluster name — used in AWS resource tags"
+  type        = string
+}

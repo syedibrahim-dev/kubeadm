@@ -6,6 +6,12 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "cluster_name" {
+  description = "Kubernetes cluster name — used in AWS resource tags and LBC configuration"
+  type        = string
+  default     = "kubeadm-cluster"
+}
+
 # VPC Configuration
 variable "vpc" {
   description = "VPC and network configuration"

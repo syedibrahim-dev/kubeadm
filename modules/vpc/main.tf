@@ -8,7 +8,7 @@ resource "aws_vpc" "k8s_vpc" {
 
   tags = {
     Name                                  = "k8s-private-vpc"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -31,7 +31,7 @@ resource "aws_subnet" "public" {
   tags = {
     Name                                  = "k8s-public-subnet"
     "kubernetes.io/role/elb"              = "1"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -44,7 +44,7 @@ resource "aws_subnet" "private" {
   tags = {
     Name                                  = "k8s-private-subnet"
     "kubernetes.io/role/internal-elb"     = "1"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -81,7 +81,7 @@ resource "aws_subnet" "public_2" {
   tags = {
     Name                                    = "k8s-public-subnet-2"
     "kubernetes.io/role/elb"                = "1"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -94,7 +94,7 @@ resource "aws_subnet" "private_2" {
   tags = {
     Name                                    = "k8s-private-subnet-2"
     "kubernetes.io/role/internal-elb"       = "1"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 

@@ -297,7 +297,7 @@ resource "aws_instance" "control_plane" {
   tags = {
     Name                                    = var.control_plane_name
     Role                                    = "control-plane"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -329,6 +329,6 @@ resource "aws_instance" "worker" {
   tags = {
     Name                                    = "${var.worker_name}-${count.index + 1}"
     Role                                    = "worker"
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }

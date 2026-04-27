@@ -9,13 +9,15 @@ module "vpc" {
   public_subnet_2_cidr  = var.vpc.public_subnet_2_cidr
   private_subnet_2_cidr = var.vpc.private_subnet_2_cidr
   availability_zone_2   = data.aws_availability_zones.available.names[1]
+  cluster_name          = var.cluster_name
 }
 
 # Security Module - Creates security groups
 module "security" {
   source = "./modules/security"
 
-  vpc_id = module.vpc.vpc_id
+  vpc_id       = module.vpc.vpc_id
+  cluster_name = var.cluster_name
 }
 
 # Compute Module - Creates Kubernetes nodes (MUST be created before admin)
@@ -35,6 +37,7 @@ module "compute" {
   enable_auto_setup           = var.enable_auto_setup
   aws_region                  = var.aws_region
   nat_gateway_id              = module.vpc.nat_gateway_id
+  cluster_name                = var.cluster_name
 }
 
 # Admin Module - Creates private kubectl management instance (depends on control plane)
@@ -69,7 +72,7 @@ module "argocd" {
   gitops_path     = var.gitops_path
   app_namespace   = var.app_namespace
   aws_region      = var.aws_region
-  cluster_name    = "kubeadm-cluster"
+  cluster_name    = var.cluster_name
 }
 
 # Pre-destroy cleanup — fires automatically on terraform destroy BEFORE EC2s are terminated.

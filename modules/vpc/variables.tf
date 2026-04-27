@@ -34,3 +34,8 @@ variable "private_subnet_2_cidr" {
   description = "CIDR block for second private subnet (AZ2, ALB use only)"
   type        = string
 }
+
+variable "cluster_name" {
+  description = "Kubernetes cluster name — used in AWS resource tags"
+  type        = string
+}
