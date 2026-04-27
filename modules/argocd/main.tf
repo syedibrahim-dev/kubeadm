@@ -1,3 +1,24 @@
+# Pre-install cleanup — removes stale LBC webhooks and partial Helm releases
+# from any previous failed attempt. Must run before Helm installs so ArgoCD
+# Service creation is never blocked by a dead webhook endpoint.
+resource "null_resource" "pre_install_cleanup" {
+  provisioner "local-exec" {
+    environment = {
+      KUBECONFIG = "/home/ubuntu/.kube/config"
+    }
+    command = <<-EOT
+      echo "Cleaning up stale LBC webhooks and partial releases..."
+      kubectl delete mutatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
+      kubectl delete validatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
+      helm uninstall aws-load-balancer-controller -n kube-system 2>/dev/null || true
+      helm uninstall argocd -n argocd 2>/dev/null || true
+      echo "Cleanup complete."
+    EOT
+  }
+
+  depends_on = [var.cluster_ready]
+}
+
 # ArgoCD — NodePort service, accessed via internal ALB through AWS LBC
 resource "helm_release" "argocd" {
   name             = "argocd"
@@ -24,7 +45,7 @@ resource "helm_release" "argocd" {
     })
   ]
 
-  depends_on = [var.cluster_ready]
+  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
 }
 
 # Look up the VPC by tag — avoids a module dependency that would force VPC creation
@@ -62,7 +83,7 @@ resource "helm_release" "aws_lbc" {
   ]
 
   wait       = true
-  depends_on = [var.cluster_ready]
+  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
 }
 
 data "kubernetes_secret" "argocd_admin_password" {
@@ -95,9 +116,6 @@ resource "null_resource" "argocd_application" {
     }
 
     command = <<-EOT
-      echo "Cleaning up any stale LBC webhooks from previous failed attempts..."
-      kubectl delete mutatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
-      kubectl delete validatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
       echo "Waiting for ArgoCD server to be ready..."
       kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
       echo "Waiting for AWS Load Balancer Controller to be ready..."
