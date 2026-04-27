@@ -45,7 +45,7 @@ resource "helm_release" "argocd" {
     })
   ]
 
-  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
+  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup, null_resource.wait_for_lbc_webhook]
 }
 
 # Look up the VPC by tag — avoids a module dependency that would force VPC creation
@@ -84,6 +84,36 @@ resource "helm_release" "aws_lbc" {
 
   wait       = true
   depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
+}
+
+# Waits for the LBC webhook server to actually accept connections before ArgoCD
+# installs. helm wait=true only checks pod Running state — the webhook server
+# inside LBC starts a few seconds later. Any Service creation during that gap
+# hits connection refused and fails the entire ArgoCD install.
+resource "null_resource" "wait_for_lbc_webhook" {
+  provisioner "local-exec" {
+    environment = {
+      KUBECONFIG = "/home/ubuntu/.kube/config"
+    }
+    command = <<-EOT
+      echo "Waiting for LBC webhook endpoint to be ready..."
+      for i in $(seq 1 36); do
+        ENDPOINT=$(kubectl get endpoints aws-load-balancer-webhook-service \
+          -n kube-system \
+          -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
+        if echo "$ENDPOINT" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "LBC webhook is ready at $ENDPOINT"
+          exit 0
+        fi
+        echo "Not ready yet, attempt $i/36..."
+        sleep 5
+      done
+      echo "ERROR: LBC webhook endpoint never became ready"
+      exit 1
+    EOT
+  }
+
+  depends_on = [helm_release.aws_lbc]
 }
 
 data "kubernetes_secret" "argocd_admin_password" {
