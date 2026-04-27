@@ -12,33 +12,35 @@ A fully automated, private Kubernetes cluster on AWS provisioned with Terraform 
               ┌─────────────▼──────────────┐
               │    Public ALB (AWS LBC)     │  ← app traffic only
               │    port 80, internet-facing │
+              │    spans AZ1 + AZ2          │
               └─────────────┬──────────────┘
-                            │
+                            │ NodePort
                             ▼
-                       app pods directly
-                       (target-type: instance → NodePort)
+                       react-frontend pod (NodePort 80)
+                       go-backend pod    (NodePort 8080)
 
               ┌─────────────────────────────┐
               │   Internal ALB (AWS LBC)    │  ← VPC-only, no public IP
               │   port 80, scheme: internal │
+              │   spans AZ1 + AZ2          │
               └─────────────┬──────────────┘
-                            │
+                            │ NodePort
                             ▼
-                       argocd-server pod
+                       argocd-server pod (NodePort)
 
-              ┌─────────────────────────────────────────────┐
-              │              Private Subnet                  │
-              │                                             │
-              │  ┌─────────────┐   ┌─────────────────────┐ │
-              │  │  Admin EC2  │   │  K8s Worker Node    │ │
-              │  │  (kubectl)  │   │  (app + argocd pods)│ │
-              │  └──────┬──────┘   └─────────────────────┘ │
-              │         │                                   │
-              │  ┌──────▼───────────────────────────────┐  │
-              │  │        K8s Control Plane             │  │
-              │  │        (10.0.10.100:6443)            │  │
-              │  └──────────────────────────────────────┘  │
-              └─────────────────────────────────────────────┘
+              ┌──────────────────────────────────────────────────────┐
+              │   AZ1 — Private Subnet (10.0.10.0/24)                │
+              │                                                      │
+              │  ┌─────────────┐   ┌──────────────┐   ┌──────────┐  │
+              │  │  Admin EC2  │   │  K8s Worker  │   │  Control │  │
+              │  │  (kubectl)  │   │     Node     │   │  Plane   │  │
+              │  └─────────────┘   └──────────────┘   │10.0.10.100│ │
+              │                                        └──────────┘  │
+              └──────────────────────────────────────────────────────┘
+              ┌──────────────────────────────────────────────────────┐
+              │   AZ2 — Private Subnet (10.0.11.0/24)                │
+              │   (ALB subnet only — no K8s nodes here)              │
+              └──────────────────────────────────────────────────────┘
                             │
               ┌─────────────▼──────────────┐
               │       NAT Gateway          │
@@ -51,6 +53,7 @@ A fully automated, private Kubernetes cluster on AWS provisioned with Terraform 
 - The Kubernetes API server is reachable **only from the admin EC2** (security group enforced)
 - **AWS Load Balancer Controller** provisions ALBs directly from Ingress resources — no ingress-nginx needed
 - ArgoCD is **not internet-facing** — internal ALB only, accessed via SSM tunnel through admin EC2
+- **Two AZs** are required — AWS ALB must span at least 2 availability zones. AZ2 subnets exist for ALB only; all K8s nodes run in AZ1
 
 ---
 
@@ -84,7 +87,7 @@ terraform apply
               │  3. Waits for CCM to clear uninitialized taint
               │  4. terraform apply -var="deploy_argocd=true"
               │         │
-              │         ├──► Helm ──► ArgoCD (ClusterIP)
+              │         ├──► Helm ──► ArgoCD (NodePort)
               │         ├──► Helm ──► AWS Load Balancer Controller
               │         └──► kubectl apply ──► ArgoCD Application CR
               │                               ArgoCD Ingress (internal ALB)
@@ -173,8 +176,14 @@ kind: Ingress                       →    aws elbv2 create-load-balancer
   scheme: internet-facing           →      --scheme internet-facing
   target-type: instance             →    aws elbv2 create-target-group
   path: /                           →    aws elbv2 create-listener
-  backend: app-service:80           →    aws elbv2 register-targets (NodePorts)
+  backend: react-frontend:80        →    aws elbv2 register-targets (NodePorts)
 ```
+
+**Requirements:**
+- Services must be `type: NodePort` (not `ClusterIP`) — LBC routes ALB traffic to NodePorts on EC2 nodes
+- Subnets must exist in **at least 2 availability zones** — AWS ALB hard requirement
+- Public subnets tagged `kubernetes.io/role/elb = 1` — LBC uses this to discover internet-facing ALB subnets
+- Private subnets tagged `kubernetes.io/role/internal-elb = 1` — for internal ALB subnet discovery
 
 **Why LBC over ingress-nginx + CCM:**
 
@@ -197,7 +206,7 @@ The K8s API server is a private IP unreachable from your laptop, so Terraform is
 terraform init
 terraform apply
 ```
-Creates VPC, subnets, NAT gateway, security groups, and all EC2 instances.
+Creates VPC (4 subnets across 2 AZs), NAT gateway, security groups, and all EC2 instances.
 
 **Stage 2 — runs automatically on the admin EC2 via cloud-init:**
 
@@ -208,6 +217,8 @@ Creates VPC, subnets, NAT gateway, security groups, and all EC2 instances.
 4. Runs `terraform apply -var="deploy_argocd=true" -target='module.argocd[0]'`
 
 The admin EC2 is inside the VPC so it can reach `10.0.10.100:6443` directly.
+
+> **Why `-target`?** Stage 2 starts with a fresh git clone and no Terraform state. The argocd module uses a `data "aws_vpc"` lookup (no module dependency on VPC), so `-target='module.argocd[0]'` only creates Helm releases and Kubernetes resources — it never attempts to recreate VPC or EC2 instances.
 
 ---
 
@@ -224,7 +235,7 @@ kubeadm/
 │   └── terraform.tfvars           # Variable values
 │
 ├── modules/
-│   ├── vpc/                       # VPC, public/private subnets, NAT gateway
+│   ├── vpc/                       # VPC, 4 subnets across 2 AZs, NAT gateway
 │   ├── security/                  # Security groups for K8s nodes and admin
 │   ├── compute/                   # EC2: control plane + workers, IAM roles + LBC policy
 │   ├── admin/                     # Admin EC2 — kubectl gateway, runs Stage 2
@@ -339,7 +350,7 @@ sleep 60
 terraform destroy
 ```
 
-> The `pre_destroy_nlb_cleanup` null_resource automates this from the second deploy onwards — it fires before EC2s are terminated and sends the above commands via SSM.
+> The `pre_destroy_nlb_cleanup` null_resource automates this — it fires before EC2s are terminated and sends the above commands via SSM. Without it, ALBs remain attached to subnets and VPC deletion hangs indefinitely.
 
 ---
 
