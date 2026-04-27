@@ -1,4 +1,4 @@
-# ArgoCD — ClusterIP service, accessed via ALB through AWS LBC
+# ArgoCD — NodePort service, accessed via internal ALB through AWS LBC
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -7,6 +7,7 @@ resource "helm_release" "argocd" {
   create_namespace = true
   version          = "7.7.11"
   timeout          = 600
+  wait             = true
 
   values = [
     yamlencode({
@@ -30,7 +31,7 @@ resource "helm_release" "argocd" {
 # when running Stage 2 (terraform apply -target='module.argocd[0]') on admin EC2.
 data "aws_vpc" "cluster" {
   tags = {
-    "kubernetes.io/cluster/kubeadm-cluster" = "owned"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -60,6 +61,7 @@ resource "helm_release" "aws_lbc" {
     })
   ]
 
+  wait       = true
   depends_on = [var.cluster_ready]
 }
 
@@ -93,6 +95,9 @@ resource "null_resource" "argocd_application" {
     }
 
     command = <<-EOT
+      echo "Cleaning up any stale LBC webhooks from previous failed attempts..."
+      kubectl delete mutatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
+      kubectl delete validatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
       echo "Waiting for ArgoCD server to be ready..."
       kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
       echo "Waiting for AWS Load Balancer Controller to be ready..."

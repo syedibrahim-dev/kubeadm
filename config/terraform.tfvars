@@ -1,6 +1,7 @@
 
 # AWS Configuration
-aws_region = "us-east-1"  
+aws_region   = "us-east-1"
+cluster_name = "kubeadm-cluster"  
 
 # VPC Configuration
 vpc = {
