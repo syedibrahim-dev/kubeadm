@@ -17,6 +17,7 @@ module "security" {
   source = "./modules/security"
 
   vpc_id       = module.vpc.vpc_id
+  vpc_cidr     = var.vpc.vpc_cidr
   cluster_name = var.cluster_name
 }
 
@@ -59,6 +60,24 @@ module "admin" {
   github_repo              = var.github_repo
 }
 
+# Loadbalancer Module — external ALB + internal NLB, fully Terraform-managed.
+# Runs in Stage 1 (from laptop) alongside VPC and compute.
+# ALB targets NLB private IPs (static). NLB targets worker nodes on NodePort 30080.
+# NLB health checks will show unhealthy until Stage 2 deploys nginx on the nodes.
+module "loadbalancer" {
+  source = "./modules/loadbalancer"
+
+  vpc_id              = module.vpc.vpc_id
+  vpc_cidr            = var.vpc.vpc_cidr
+  public_subnet_id    = module.vpc.public_subnet_id
+  public_subnet_2_id  = module.vpc.public_subnet_2_id
+  private_subnet_id   = module.vpc.private_subnet_id
+  private_subnet_2_id = module.vpc.private_subnet_2_id
+  worker_instance_ids = module.compute.worker_id
+  worker_count        = var.compute.worker_count
+  domain_name         = var.domain_name
+}
+
 # ArgoCD Module - Stage 2: runs automatically on the admin EC2 instance (inside VPC)
 # deploy_argocd defaults to false so this is skipped during local Stage 1 apply.
 # admin-setup.sh re-runs terraform with -var="deploy_argocd=true" from inside the VPC
@@ -73,16 +92,16 @@ module "argocd" {
   app_namespace   = var.app_namespace
   aws_region      = var.aws_region
   cluster_name    = var.cluster_name
+  nlb_private_ip  = module.loadbalancer.nlb_private_ip_az1
+  # ── Route53 approach (commented out) ──
+  # domain_name   = var.domain_name
 }
 
-# Pre-destroy cleanup — fires automatically on terraform destroy BEFORE EC2s are terminated.
-# AWS LBC creates ALBs outside Terraform state so Terraform can't delete them directly.
-# This sends an SSM command to the admin EC2 to:
-#   1. Pause ArgoCD sync (prevents it from recreating Ingress resources)
-#   2. Delete Ingress resources (triggers LBC to delete ALBs)
-# Without this, VPC/subnet destruction hangs because AWS won't delete a subnet
-# that still has an ALB attached.
-resource "null_resource" "pre_destroy_nlb_cleanup" {
+# Pre-destroy: pause ArgoCD sync before EC2s are terminated so it doesn't
+# fight the destroy by reconciling resources during teardown.
+# ALB and NLB are now in Terraform state (modules/loadbalancer) so they are
+# deleted automatically by terraform destroy — no manual cleanup needed.
+resource "null_resource" "pre_destroy_cleanup" {
   triggers = {
     admin_instance_id = module.admin.admin_instance_id
     aws_region        = var.aws_region
@@ -91,21 +110,13 @@ resource "null_resource" "pre_destroy_nlb_cleanup" {
   provisioner "local-exec" {
     when    = destroy
     command = <<-EOT
-      echo "Pre-destroy: removing Ingress resources so AWS LBC can delete ALBs..."
-      COMMAND_ID=$(aws ssm send-command \
+      echo "Pre-destroy: pausing ArgoCD sync..."
+      aws ssm send-command \
         --instance-ids "${self.triggers.admin_instance_id}" \
         --document-name "AWS-RunShellScript" \
-        --parameters '{"commands":["kubectl patch app k8s-app -n argocd -p \"{\\\"spec\\\":{\\\"syncPolicy\\\":null}}\" --type=merge || true","kubectl delete ingress argocd-server-ingress -n argocd --ignore-not-found=true","kubectl delete ingress app-ingress -n test-app --ignore-not-found=true"]}' \
+        --parameters '{"commands":["kubectl patch app k8s-app -n argocd -p \"{\\\"spec\\\":{\\\"syncPolicy\\\":null}}\" --type=merge 2>/dev/null || true"]}' \
         --region "${self.triggers.aws_region}" \
-        --query "Command.CommandId" \
-        --output text 2>/dev/null) || true
-
-      if [ -n "$COMMAND_ID" ] && [ "$COMMAND_ID" != "None" ]; then
-        echo "SSM command sent ($COMMAND_ID). Waiting 90s for AWS LBC to delete ALBs..."
-        sleep 90
-      else
-        echo "Could not reach admin EC2 via SSM — skipping ALB cleanup."
-      fi
+        --output text 2>/dev/null || true
       echo "Pre-destroy cleanup done."
     EOT
   }

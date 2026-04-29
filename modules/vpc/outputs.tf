@@ -24,3 +24,13 @@ output "nat_gateway_id" {
   description = "NAT Gateway ID for dependency management"
   value       = aws_nat_gateway.k8s_nat.id
 }
+
+output "public_subnet_2_id" {
+  description = "Second public subnet ID (AZ2)"
+  value       = aws_subnet.public_2.id
+}
+
+output "private_subnet_2_id" {
+  description = "Second private subnet ID (AZ2)"
+  value       = aws_subnet.private_2.id
+}

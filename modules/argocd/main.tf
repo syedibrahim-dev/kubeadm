@@ -1,17 +1,36 @@
-# Pre-install cleanup — removes stale LBC webhooks and partial Helm releases
-# from any previous failed attempt. Must run before Helm installs so ArgoCD
-# Service creation is never blocked by a dead webhook endpoint.
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTE: AWS Load Balancer Controller (LBC) code is commented out below.
+# ALB and NLB are now managed by modules/loadbalancer (pure Terraform).
+# Uncomment the LBC blocks if you want to switch back to LBC-managed load
+# balancers — you would also need to restore the LBC IAM policy in the
+# compute module and revert nginx to LoadBalancer type with NLB annotations.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Pre-install cleanup — removes partial releases and stale resources from any
+# previous failed attempt so a fresh deploy always starts from a clean state.
+# NOTE: helm is not installed on the admin EC2 — kubectl is used instead.
 resource "null_resource" "pre_install_cleanup" {
   provisioner "local-exec" {
     environment = {
       KUBECONFIG = "/home/ubuntu/.kube/config"
     }
     command = <<-EOT
-      echo "Cleaning up stale LBC webhooks and partial releases..."
-      kubectl delete mutatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
-      kubectl delete validatingwebhookconfigurations aws-load-balancer-webhook --ignore-not-found=true
-      helm uninstall aws-load-balancer-controller -n kube-system 2>/dev/null || true
-      helm uninstall argocd -n argocd 2>/dev/null || true
+      echo "Cleaning up stale resources from any previous attempt..."
+
+      # Remove stale LBC resources if present from older deploys that had LBC enabled.
+      # LBC is not in the current Terraform code so it will not be re-installed.
+      kubectl delete deployment aws-load-balancer-controller -n kube-system --ignore-not-found 2>/dev/null || true
+      kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found 2>/dev/null || true
+
+      # Delete namespaces so Helm installs always start from a clean slate.
+      kubectl delete namespace ingress-nginx --ignore-not-found 2>/dev/null || true
+      kubectl delete namespace argocd --ignore-not-found 2>/dev/null || true
+
+      # Wait for namespaces to be fully terminated before Helm re-creates them.
+      echo "Waiting for namespaces to terminate..."
+      kubectl wait --for=delete namespace/ingress-nginx --timeout=60s 2>/dev/null || true
+      kubectl wait --for=delete namespace/argocd --timeout=60s 2>/dev/null || true
+
       echo "Cleanup complete."
     EOT
   }
@@ -19,7 +38,113 @@ resource "null_resource" "pre_install_cleanup" {
   depends_on = [var.cluster_ready]
 }
 
-# ArgoCD — NodePort service, accessed via internal ALB through AWS LBC
+# ── LBC: commented out ────────────────────────────────────────────────────────
+# data "aws_vpc" "cluster" {
+#   tags = {
+#     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+#   }
+# }
+#
+# resource "helm_release" "aws_lbc" {
+#   name             = "aws-load-balancer-controller"
+#   repository       = "https://aws.github.io/eks-charts"
+#   chart            = "aws-load-balancer-controller"
+#   namespace        = "kube-system"
+#   version          = "1.8.1"
+#   timeout          = 600
+#   wait             = true
+#   values = [
+#     yamlencode({
+#       clusterName  = var.cluster_name
+#       region       = var.aws_region
+#       vpcId        = data.aws_vpc.cluster.id
+#       serviceAccount = { create = true, name = "aws-load-balancer-controller" }
+#       enableShield = false
+#       enableWaf    = false
+#       enableWafv2  = false
+#     })
+#   ]
+#   depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
+# }
+#
+# resource "null_resource" "wait_for_lbc_webhook" {
+#   provisioner "local-exec" {
+#     environment = { KUBECONFIG = "/home/ubuntu/.kube/config" }
+#     command     = <<-EOT
+#       echo "Waiting for LBC webhook endpoint to be ready..."
+#       for i in $(seq 1 36); do
+#         ENDPOINT=$(kubectl get endpoints aws-load-balancer-webhook-service \
+#           -n kube-system -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
+#         if echo "$ENDPOINT" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+#           echo "LBC webhook is ready at $ENDPOINT"
+#           exit 0
+#         fi
+#         echo "Not ready yet, attempt $i/36..."
+#         sleep 5
+#       done
+#       echo "ERROR: LBC webhook endpoint never became ready"
+#       exit 1
+#     EOT
+#   }
+#   depends_on = [helm_release.aws_lbc]
+# }
+# ─────────────────────────────────────────────────────────────────────────────
+
+# nginx ingress controller — single controller for all HTTP routing.
+# NodePort :30080 is the fixed entry point for both the external ALB and
+# internal NLB (both managed by modules/loadbalancer via Terraform).
+# nginx routes based on URL path:
+#   /        → app pods (ClusterIP) — defined in GitOps repo Ingress resources
+#   /argocd  → argocd-server (ClusterIP)
+resource "helm_release" "nginx_ingress" {
+  name             = "ingress-nginx"
+  repository       = "https://kubernetes.github.io/ingress-nginx"
+  chart            = "ingress-nginx"
+  namespace        = "ingress-nginx"
+  create_namespace = true
+  version          = "4.10.1"
+  timeout          = 600
+  wait             = true
+
+  values = [
+    yamlencode({
+      controller = {
+        service = {
+          type = "NodePort"
+          nodePorts = {
+            http  = 30080
+            https = 30443
+          }
+        }
+      }
+    })
+  ]
+
+  # ── LBC approach: LoadBalancer type with NLB annotations (commented out) ──
+  # values = [
+  #   yamlencode({
+  #     controller = {
+  #       service = {
+  #         type = "LoadBalancer"
+  #         nodePorts = { http = 30080, https = 30443 }
+  #         annotations = {
+  #           "service.beta.kubernetes.io/aws-load-balancer-type"             = "external"
+  #           "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "instance"
+  #           "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internal"
+  #           "service.beta.kubernetes.io/aws-load-balancer-name"            = "k8s-nginx-internal-nlb"
+  #         }
+  #       }
+  #     }
+  #   })
+  # ]
+
+  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
+  # ── LBC approach dependency (commented out) ──
+  # depends_on = [var.cluster_ready, null_resource.pre_install_cleanup, null_resource.wait_for_lbc_webhook]
+}
+
+# ArgoCD — ClusterIP service, accessed via internal NLB → nginx → /argocd path.
+# server.rootpath strips /argocd from all asset URLs so the UI loads correctly.
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -34,86 +159,23 @@ resource "helm_release" "argocd" {
     yamlencode({
       server = {
         service = {
-          type = "NodePort"
+          type = "ClusterIP"
         }
       }
       configs = {
         params = {
+          # server.insecure: skip TLS since nginx terminates nothing and we have no cert yet
           "server.insecure" = true
+          # server.rootpath removed — ArgoCD now serves at / on its own domain
+          # (argocd.internal.kubeadm-demo.com) so no path prefix stripping needed
         }
       }
     })
   ]
 
-  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup, null_resource.wait_for_lbc_webhook]
-}
-
-# Look up the VPC by tag — avoids a module dependency that would force VPC creation
-# when running Stage 2 (terraform apply -target='module.argocd[0]') on admin EC2.
-data "aws_vpc" "cluster" {
-  tags = {
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
-  }
-}
-
-# AWS Load Balancer Controller — single controller that provisions ALBs from Ingress resources.
-# Replaces two separate ingress-nginx controllers.
-# Uses EC2 instance profile for AWS API access (no IRSA needed for non-EKS).
-resource "helm_release" "aws_lbc" {
-  name             = "aws-load-balancer-controller"
-  repository       = "https://aws.github.io/eks-charts"
-  chart            = "aws-load-balancer-controller"
-  namespace        = "kube-system"
-  version          = "1.8.1"
-  timeout          = 600
-
-  values = [
-    yamlencode({
-      clusterName = var.cluster_name
-      region      = var.aws_region
-      vpcId       = data.aws_vpc.cluster.id
-      serviceAccount = {
-        create = true
-        name   = "aws-load-balancer-controller"
-      }
-      enableShield = false
-      enableWaf    = false
-      enableWafv2  = false
-    })
-  ]
-
-  wait       = true
   depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
-}
-
-# Waits for the LBC webhook server to actually accept connections before ArgoCD
-# installs. helm wait=true only checks pod Running state — the webhook server
-# inside LBC starts a few seconds later. Any Service creation during that gap
-# hits connection refused and fails the entire ArgoCD install.
-resource "null_resource" "wait_for_lbc_webhook" {
-  provisioner "local-exec" {
-    environment = {
-      KUBECONFIG = "/home/ubuntu/.kube/config"
-    }
-    command = <<-EOT
-      echo "Waiting for LBC webhook endpoint to be ready..."
-      for i in $(seq 1 36); do
-        ENDPOINT=$(kubectl get endpoints aws-load-balancer-webhook-service \
-          -n kube-system \
-          -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
-        if echo "$ENDPOINT" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-          echo "LBC webhook is ready at $ENDPOINT"
-          exit 0
-        fi
-        echo "Not ready yet, attempt $i/36..."
-        sleep 5
-      done
-      echo "ERROR: LBC webhook endpoint never became ready"
-      exit 1
-    EOT
-  }
-
-  depends_on = [helm_release.aws_lbc]
+  # ── LBC approach dependency (commented out) ──
+  # depends_on = [var.cluster_ready, null_resource.pre_install_cleanup, null_resource.wait_for_lbc_webhook]
 }
 
 data "kubernetes_secret" "argocd_admin_password" {
@@ -124,14 +186,12 @@ data "kubernetes_secret" "argocd_admin_password" {
   depends_on = [helm_release.argocd]
 }
 
-data "kubernetes_ingress_v1" "argocd" {
-  metadata {
-    name      = "argocd-server-ingress"
-    namespace = "argocd"
-  }
-  depends_on = [null_resource.argocd_application]
-}
-
+# Applies:
+#   1. ArgoCD Application CR — tells ArgoCD to sync from the GitOps repo
+#   2. ArgoCD nginx Ingress  — routes /argocd → argocd-server (ClusterIP)
+#
+# Note: external-alb-ingress is no longer applied here.
+# The external ALB is now a Terraform resource in modules/loadbalancer.
 resource "null_resource" "argocd_application" {
   triggers = {
     gitops_repo_url = var.gitops_repo_url
@@ -148,10 +208,10 @@ resource "null_resource" "argocd_application" {
     command = <<-EOT
       echo "Waiting for ArgoCD server to be ready..."
       kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
-      echo "Waiting for AWS Load Balancer Controller to be ready..."
+      echo "Waiting for nginx ingress controller to be ready..."
       kubectl wait --for=condition=available --timeout=300s \
-        deployment/aws-load-balancer-controller -n kube-system
-      echo "Applying ArgoCD Application CR and Ingress..."
+        deployment/ingress-nginx-controller -n ingress-nginx
+      echo "Applying ArgoCD Application CR and nginx Ingress..."
       kubectl apply -f - <<'EOF'
       apiVersion: argoproj.io/v1alpha1
       kind: Application
@@ -179,14 +239,11 @@ resource "null_resource" "argocd_application" {
       metadata:
         name: argocd-server-ingress
         namespace: argocd
-        annotations:
-          alb.ingress.kubernetes.io/scheme: internal
-          alb.ingress.kubernetes.io/target-type: instance
-          alb.ingress.kubernetes.io/backend-protocol: HTTP
       spec:
-        ingressClassName: alb
+        ingressClassName: nginx
         rules:
-        - http:
+        - host: argocd.${var.nlb_private_ip}.nip.io
+          http:
             paths:
             - path: /
               pathType: Prefix
@@ -195,9 +252,31 @@ resource "null_resource" "argocd_application" {
                   name: argocd-server
                   port:
                     number: 80
+      # ── Route53 approach: use real internal domain (commented out) ──
+      # - host: argocd.internal.$${var.domain_name}
+      #   http:
+      #     paths:
+      #     - path: /
+      #       pathType: Prefix
+      #       backend:
+      #         service:
+      #           name: argocd-server
+      #           port:
+      #             number: 80
       EOF
     EOT
   }
 
-  depends_on = [helm_release.argocd, helm_release.aws_lbc]
+  depends_on = [helm_release.argocd, helm_release.nginx_ingress]
 }
+
+# ── LBC approach: data sources for dynamic ALB/NLB hostnames (commented out) ──
+# data "kubernetes_ingress_v1" "external_alb" {
+#   metadata { name = "external-alb-ingress", namespace = "ingress-nginx" }
+#   depends_on = [null_resource.argocd_application]
+# }
+#
+# data "kubernetes_service" "nginx_nlb" {
+#   metadata { name = "ingress-nginx-controller", namespace = "ingress-nginx" }
+#   depends_on = [helm_release.nginx_ingress]
+# }

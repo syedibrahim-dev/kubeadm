@@ -116,3 +116,9 @@ variable "app_namespace" {
   type        = string
   default     = "test-app"
 }
+
+variable "domain_name" {
+  description = "Base domain name — public zone: app/api subdomains, private zone: argocd.internal subdomain"
+  type        = string
+  default     = "kubeadm-demo.com"
+}

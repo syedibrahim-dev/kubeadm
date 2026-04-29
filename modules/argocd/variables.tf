@@ -38,3 +38,16 @@ variable "gitops_path" {
   type        = string
   default     = "k8s-app/overlays/production"
 }
+
+variable "nlb_private_ip" {
+  description = "Fixed private IP of internal NLB — forms argocd.<ip>.nip.io hostname for nginx Ingress"
+  type        = string
+  default     = "10.0.10.50"
+}
+
+# ── Route53 approach (commented out) ──
+# variable "domain_name" {
+#   description = "Base domain — ArgoCD nginx Ingress uses argocd.internal.<domain>"
+#   type        = string
+#   default     = "kubeadm-demo.com"
+# }
