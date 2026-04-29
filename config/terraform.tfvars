@@ -31,3 +31,6 @@ admin = {
 
 # Automation Configuration
 enable_auto_setup = true
+
+# Domain Configuration
+domain_name = "kubeadm-demo.com"

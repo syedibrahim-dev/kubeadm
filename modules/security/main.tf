@@ -46,16 +46,17 @@ resource "aws_security_group" "k8s_nodes_sg" {
     description = "Allow all traffic between K8s nodes"
   }
 
-  # Allow ALB → NodePort range (target-type: instance)
-  # AWS Load Balancer Controller provisions ALBs that forward to NodePorts on EC2.
-  # ALB manages its own security group and injects rules dynamically,
-  # but the base NodePort range must be open to allow health checks and traffic.
+  # Allow traffic to nginx ingress NodePort (fixed at 30080).
+  # Both the external ALB and internal NLB route to this port on worker nodes.
+  # ALBs and NLBs live inside the VPC, so their source IPs are always within var.vpc_cidr.
+  # LBC also adds its own managed SG rule for the external ALB — this VPC CIDR rule
+  # additionally covers the internal NLB whose source IPs are never public.
   ingress {
-    from_port   = 30000
-    to_port     = 32767
+    from_port   = 30080
+    to_port     = 30080
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow ALB traffic to Kubernetes NodePort range"
+    cidr_blocks = [var.vpc_cidr]
+    description = "Allow nginx NodePort from VPC CIDR (external ALB and internal NLB)"
   }
 
   # Allow all outbound traffic (for SSM agent, downloading packages via NAT)

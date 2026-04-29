@@ -157,6 +157,42 @@ set -e
 echo "Deploying ArgoCD via Terraform (Stage 2)..."
 cd /home/ubuntu/kubeadm-infra
 
+# ── Wait for all nodes to be Ready ──────────────────────────────────────────
+echo "Checking node readiness before deploying..."
+max_wait=300
+elapsed=0
+while true; do
+  not_ready=$(kubectl get nodes --no-headers 2>/dev/null | grep -v " Ready" | wc -l || echo "99")
+  total=$(kubectl get nodes --no-headers 2>/dev/null | wc -l || echo "0")
+  if [ "$total" -gt 0 ] && [ "$not_ready" -eq 0 ]; then
+    echo "All $total nodes are Ready."
+    break
+  fi
+  if [ $elapsed -ge $max_wait ]; then
+    echo "WARNING: Timed out waiting for nodes. Proceeding anyway..."
+    break
+  fi
+  echo "Waiting for nodes... ($elapsed/$max_wait s)"
+  sleep 15
+  elapsed=$((elapsed + 15))
+done
+
+# ── Wait for CCM to clear the uninitialized taint ───────────────────────────
+# Until CCM removes this taint, Helm pre-install hook pods cannot be scheduled
+# and helm_release.nginx_ingress will time out and roll back.
+echo "Waiting for AWS CCM to initialize all nodes..."
+ccm_elapsed=0
+while kubectl get nodes -o json 2>/dev/null | grep -q "node.cloudprovider.kubernetes.io/uninitialized"; do
+  if [ $ccm_elapsed -ge 300 ]; then
+    echo "WARNING: CCM taint wait timed out after 300s. Proceeding anyway..."
+    break
+  fi
+  echo "CCM still initializing nodes... ($ccm_elapsed/300s)"
+  sleep 15
+  ccm_elapsed=$((ccm_elapsed + 15))
+done
+echo "All nodes initialized. Proceeding with Terraform deployment."
+
 # Copy kubeconfig so Helm/Kubernetes providers can reach the API server
 mkdir -p .terraform
 cp ~/.kube/config .terraform/kubeconfig
