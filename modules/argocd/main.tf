@@ -270,7 +270,8 @@ resource "null_resource" "argocd_application" {
         annotations:
           # Rewrite /argocd → / before proxying to argocd-server.
           # Matches both /argocd and /argocd/ due to trailing slash handling.
-          nginx.ingress.kubernetes.io/rewrite-target: /
+          nginx.ingress.kubernetes.io/use-regex: "true"
+          nginx.ingress.kubernetes.io/rewrite-target: /$2
           # Restrict to VPC CIDR — ArgoCD is internal-only.
           # Reachable via SSM tunnel to NLB (10.0.10.50:80) only.
           nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/16"
@@ -279,8 +280,8 @@ resource "null_resource" "argocd_application" {
         rules:
         - http:
             paths:
-            - path: /argocd
-              pathType: Prefix
+            - path: /argocd(/|$)(.*)
+              pathType: ImplementationSpecific
               backend:
                 service:
                   name: argocd-server
