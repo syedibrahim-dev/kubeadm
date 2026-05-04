@@ -194,9 +194,8 @@ resource "helm_release" "argocd" {
         params = {
           # server.insecure: skip TLS since nginx terminates TLS (no cert yet)
           "server.insecure" = true
-          # server.rootpath: ArgoCD is served at /argocd via nginx path-based routing.
-          # This tells ArgoCD to prefix all asset URLs with /argocd so the UI loads correctly.
-          "server.rootpath" = "/argocd"
+          # nginx Ingress rewrites /argocd → / before proxying, so no rootpath needed.
+          # ArgoCD serves at / inside the pod.
         }
       }
     })
@@ -270,10 +269,8 @@ resource "null_resource" "argocd_application" {
         namespace: argocd
         annotations:
           # Rewrite /argocd → / before proxying to argocd-server.
-          # ArgoCD's server.rootpath=/argocd means it generates /argocd-prefixed
-          # asset URLs; nginx strips the prefix before forwarding to the pod.
-          nginx.ingress.kubernetes.io/rewrite-target: /$2
-          nginx.ingress.kubernetes.io/use-regex: "true"
+          # Matches both /argocd and /argocd/ due to trailing slash handling.
+          nginx.ingress.kubernetes.io/rewrite-target: /
           # Restrict to VPC CIDR — ArgoCD is internal-only.
           # Reachable via SSM tunnel to NLB (10.0.10.50:80) only.
           nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/16"
@@ -282,8 +279,8 @@ resource "null_resource" "argocd_application" {
         rules:
         - http:
             paths:
-            - path: /argocd(/|$)(.*)
-              pathType: ImplementationSpecific
+            - path: /argocd
+              pathType: Prefix
               backend:
                 service:
                   name: argocd-server
