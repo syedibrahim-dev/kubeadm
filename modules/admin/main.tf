@@ -57,15 +57,16 @@ resource "aws_iam_role_policy" "admin_terraform_policy" {
     Version = "2012-10-17"
     Statement = [
       {
+        # All EC2 reads — covers state refresh for VPC, compute, security, admin modules.
+        # Wildcard avoids repeated one-by-one additions as new data sources are added.
+        Effect   = "Allow"
+        Action   = ["ec2:Describe*"]
+        Resource = ["*"]
+      },
+      {
+        # EC2 writes — SG management for ALB security group (argocd module Stage 2)
         Effect = "Allow"
         Action = [
-          "ec2:DescribeVpcs",
-          "ec2:DescribeVpcAttribute",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeInstances",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeNetworkInterfaces",
-          # Security group management for ALB
           "ec2:CreateSecurityGroup",
           "ec2:DeleteSecurityGroup",
           "ec2:AuthorizeSecurityGroupIngress",
@@ -78,10 +79,26 @@ resource "aws_iam_role_policy" "admin_terraform_policy" {
         Resource = ["*"]
       },
       {
+        # Full ELBv2 — creates ALB, target groups, listeners; registers CCM NLB IPs
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:*"]
+        Resource = ["*"]
+      },
+      {
+        # IAM reads — state refresh for admin module (role, policies, instance profile)
+        Effect   = "Allow"
+        Action   = ["iam:Get*", "iam:List*"]
+        Resource = ["*"]
+      },
+      {
+        # IAM writes — applied by Stage 1 (laptop), but needed if admin policy drifts
+        # and Stage 2 needs to correct it in-place
         Effect = "Allow"
         Action = [
-          # Full ELBv2 access — creates ALB, target groups, listeners, registers NLB IPs
-          "elasticloadbalancing:*"
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy"
         ]
         Resource = ["*"]
       }
