@@ -194,8 +194,10 @@ resource "helm_release" "argocd" {
         params = {
           # server.insecure: skip TLS since nginx terminates TLS (no cert yet)
           "server.insecure" = true
-          # nginx Ingress rewrites /argocd → / before proxying, so no rootpath needed.
-          # ArgoCD serves at / inside the pod.
+          # Tells ArgoCD to prefix all asset URLs with /argocd in the HTML it generates.
+          # Without this, the browser requests /assets/index.js (no prefix), nginx can't
+          # route it to ArgoCD, JS never loads, and the UI shows a blank white page.
+          "server.rootpath" = "/argocd"
         }
       }
     })
