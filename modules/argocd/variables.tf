@@ -39,35 +39,10 @@ variable "gitops_path" {
   default     = "k8s-app/overlays/production"
 }
 
-variable "vpc_id" {
-  description = "VPC ID — for ALB security group"
-  type        = string
-}
-
-variable "vpc_cidr" {
-  description = "VPC CIDR — for ALB security group egress rule"
-  type        = string
-}
-
-variable "public_subnet_id" {
-  description = "First public subnet ID (AZ1) — for external ALB"
-  type        = string
-}
-
-variable "public_subnet_2_id" {
-  description = "Second public subnet ID (AZ2) — ALB requires 2 AZs"
-  type        = string
-}
-
-variable "private_subnet_id" {
-  description = "First private subnet ID (AZ1) — CCM places NLB here"
-  type        = string
-}
-
-variable "private_subnet_2_id" {
-  description = "Second private subnet ID (AZ2) — CCM places NLB here"
-  type        = string
-}
+# VPC and subnet IDs are discovered via data sources inside this module
+# (data.aws_vpc.cluster, data.aws_subnets.public, data.aws_subnets.private)
+# so module.argocd has no dependency on module.vpc — Stage 2 can run on the
+# admin EC2 with -target=module.argocd[0] without needing Stage 1 state.
 
 # ── Route53 approach (commented out) ──
 # variable "domain_name" {

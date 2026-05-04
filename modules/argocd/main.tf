@@ -1,4 +1,38 @@
 # ─────────────────────────────────────────────────────────────────────────────
+# DATA SOURCES — discover Stage 1 infrastructure via tags.
+# This makes module.argocd self-contained: no dependency on module.vpc outputs,
+# so -target=module.argocd[0] on the admin EC2 works without Stage 1 state.
+# ─────────────────────────────────────────────────────────────────────────────
+
+data "aws_vpc" "cluster" {
+  tags = {
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+  }
+}
+
+data "aws_subnets" "public" {
+  filter {
+    name   = "tag:kubernetes.io/role/elb"
+    values = ["1"]
+  }
+  filter {
+    name   = "tag:kubernetes.io/cluster/${var.cluster_name}"
+    values = ["owned"]
+  }
+}
+
+data "aws_subnets" "private" {
+  filter {
+    name   = "tag:kubernetes.io/role/internal-elb"
+    values = ["1"]
+  }
+  filter {
+    name   = "tag:kubernetes.io/cluster/${var.cluster_name}"
+    values = ["owned"]
+  }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # NOTE: AWS Load Balancer Controller (LBC) code is commented out below.
 # ALB and NLB are now managed by modules/loadbalancer (pure Terraform).
 # Uncomment the LBC blocks if you want to switch back to LBC-managed load
@@ -115,7 +149,7 @@ resource "helm_release" "nginx_ingress" {
           annotations = {
             "service.beta.kubernetes.io/aws-load-balancer-type"     = "nlb"
             "service.beta.kubernetes.io/aws-load-balancer-internal" = "true"
-            "service.beta.kubernetes.io/aws-load-balancer-subnets"  = "${var.private_subnet_id},${var.private_subnet_2_id}"
+            "service.beta.kubernetes.io/aws-load-balancer-subnets"  = join(",", sort(data.aws_subnets.private.ids))
           }
         }
       }
@@ -331,7 +365,7 @@ resource "null_resource" "wait_for_nlb" {
 resource "aws_security_group" "alb_sg" {
   name        = "k8s-external-alb-sg"
   description = "Security group for internet-facing ALB"
-  vpc_id      = var.vpc_id
+  vpc_id      = data.aws_vpc.cluster.id
 
   ingress {
     from_port   = 80
@@ -345,7 +379,7 @@ resource "aws_security_group" "alb_sg" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = [data.aws_vpc.cluster.cidr_block]
     description = "Forward to internal NLB within VPC"
   }
 
@@ -358,7 +392,7 @@ resource "aws_lb" "external_alb" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = [var.public_subnet_id, var.public_subnet_2_id]
+  subnets            = sort(data.aws_subnets.public.ids)
 
   tags = { Name = "k8s-external-alb" }
 
@@ -373,7 +407,7 @@ resource "aws_lb_target_group" "alb_nlb" {
   name        = "k8s-alb-nlb-tg"
   port        = 80
   protocol    = "HTTP"
-  vpc_id      = var.vpc_id
+  vpc_id      = data.aws_vpc.cluster.id
   target_type = "ip"
 
   health_check {

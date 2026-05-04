@@ -74,18 +74,13 @@ module "argocd" {
   count  = var.deploy_argocd ? 1 : 0
   source = "./modules/argocd"
 
-  gitops_repo_url     = var.gitops_repo_url
-  gitops_branch       = var.gitops_branch
-  gitops_path         = var.gitops_path
-  app_namespace       = var.app_namespace
-  aws_region          = var.aws_region
-  cluster_name        = var.cluster_name
-  vpc_id              = module.vpc.vpc_id
-  vpc_cidr            = var.vpc.vpc_cidr
-  public_subnet_id    = module.vpc.public_subnet_id
-  public_subnet_2_id  = module.vpc.public_subnet_2_id
-  private_subnet_id   = module.vpc.private_subnet_id
-  private_subnet_2_id = module.vpc.private_subnet_2_id
+  gitops_repo_url = var.gitops_repo_url
+  gitops_branch   = var.gitops_branch
+  gitops_path     = var.gitops_path
+  app_namespace   = var.app_namespace
+  aws_region      = var.aws_region
+  cluster_name    = var.cluster_name
+  # vpc_id, subnets etc. are discovered via data sources inside the module
   # ── Route53 approach (commented out) ──
   # domain_name   = var.domain_name
 }
