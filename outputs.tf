@@ -44,20 +44,9 @@ output "worker_count" {
 }
 
 output "external_alb_dns" {
-  description = "External ALB DNS — open directly in browser for app access"
-  value       = module.loadbalancer.external_alb_dns
+  description = "External ALB DNS — available after Stage 2 (deploy_argocd=true)"
+  value       = var.deploy_argocd ? module.argocd[0].external_alb_dns : "Available after Stage 2 (deploy_argocd=true)"
 }
-
-output "argocd_nip_host" {
-  description = "ArgoCD nip.io hostname — use as SSM tunnel target host"
-  value       = module.loadbalancer.argocd_nip_host
-}
-
-# ── Route53 approach outputs (commented out) ──────────────────────────────────
-# output "public_zone_nameservers" {
-#   description = "Point your domain registrar to these nameservers"
-#   value       = module.loadbalancer.public_zone_nameservers
-# }
 
 output "argocd_admin_password" {
   description = "ArgoCD initial admin password"
@@ -70,21 +59,25 @@ output "argocd_access_info" {
   value       = <<-EOT
 
     ═══════════════════════════════════════════════════════════
-    ARGOCD ACCESS (via SSM tunnel to internal NLB → nginx)
+    ARGOCD ACCESS (via SSM tunnel to CCM-provisioned internal NLB)
     ═══════════════════════════════════════════════════════════
 
-    ArgoCD sits behind an internal NLB — not reachable from the internet.
+    ArgoCD sits behind an internal NLB (CCM-provisioned) — not reachable from the internet.
     nginx ingress routes /argocd → argocd-server pod (ClusterIP).
 
-    Step 1 — On your laptop, open an SSM port-forward tunnel to the internal NLB:
+    Step 1 — Get the internal NLB hostname (run on admin EC2 or via SSM):
+      kubectl get svc ingress-nginx-controller -n ingress-nginx \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+    Step 2 — On your laptop, open an SSM port-forward tunnel to the internal NLB:
       aws ssm start-session --target ${module.admin.admin_instance_id} \
         --document-name AWS-StartPortForwardingSessionToRemoteHost \
-        --parameters '{"host":["${module.loadbalancer.argocd_nip_host}"],"portNumber":["80"],"localPortNumber":["8080"]}'
+        --parameters '{"host":["<NLB-HOSTNAME-FROM-STEP-1>"],"portNumber":["80"],"localPortNumber":["8080"]}'
 
-    Step 2 — Open ArgoCD in browser:
-      http://localhost:8080
+    Step 3 — Open ArgoCD in browser (no /etc/hosts needed):
+      http://localhost:8080/argocd
 
-    Step 3 — Get ArgoCD admin password (run on admin EC2):
+    Step 4 — Get ArgoCD admin password (run on admin EC2):
       kubectl -n argocd get secret argocd-initial-admin-secret \
         -o jsonpath='{.data.password}' | base64 -d
 
@@ -92,14 +85,9 @@ output "argocd_access_info" {
     APP ACCESS (external ALB, internet-facing)
     ═══════════════════════════════════════════════════════════
 
-    App URL:  http://${module.loadbalancer.external_alb_dns}/
-    (nip.io alt): get ALB IP with: dig +short ${module.loadbalancer.external_alb_dns}
-                  then open: http://app.<ALB-IP>.nip.io
+    ALB DNS available after Stage 2: terraform output external_alb_dns
+    App URL: http://<ALB-DNS>/
 
-    ── Route53 approach (when domain is registered) ──────────
-    App URL:  http://app.<your-domain>
-    API URL:  http://api.<your-domain>
-    Nameservers: terraform output public_zone_nameservers
   EOT
 }
 

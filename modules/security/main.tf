@@ -46,17 +46,16 @@ resource "aws_security_group" "k8s_nodes_sg" {
     description = "Allow all traffic between K8s nodes"
   }
 
-  # Allow traffic to nginx ingress NodePort (fixed at 30080).
-  # Both the external ALB and internal NLB route to this port on worker nodes.
-  # ALBs and NLBs live inside the VPC, so their source IPs are always within var.vpc_cidr.
-  # LBC also adds its own managed SG rule for the external ALB — this VPC CIDR rule
-  # additionally covers the internal NLB whose source IPs are never public.
+  # Allow the full Kubernetes NodePort range from within the VPC.
+  # CCM provisions the internal NLB and auto-assigns a NodePort for nginx
+  # (no longer fixed at 30080). The NLB source IPs are always within the VPC
+  # so restricting to vpc_cidr keeps this VPC-internal only.
   ingress {
-    from_port   = 30080
-    to_port     = 30080
+    from_port   = 30000
+    to_port     = 32767
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
-    description = "Allow nginx NodePort from VPC CIDR (external ALB and internal NLB)"
+    description = "Allow K8s NodePort range from VPC CIDR (CCM-provisioned NLB → nginx)"
   }
 
   # Allow all outbound traffic (for SSM agent, downloading packages via NAT)

@@ -39,10 +39,34 @@ variable "gitops_path" {
   default     = "k8s-app/overlays/production"
 }
 
-variable "nlb_private_ip" {
-  description = "Fixed private IP of internal NLB — forms argocd.<ip>.nip.io hostname for nginx Ingress"
+variable "vpc_id" {
+  description = "VPC ID — for ALB security group"
   type        = string
-  default     = "10.0.10.50"
+}
+
+variable "vpc_cidr" {
+  description = "VPC CIDR — for ALB security group egress rule"
+  type        = string
+}
+
+variable "public_subnet_id" {
+  description = "First public subnet ID (AZ1) — for external ALB"
+  type        = string
+}
+
+variable "public_subnet_2_id" {
+  description = "Second public subnet ID (AZ2) — ALB requires 2 AZs"
+  type        = string
+}
+
+variable "private_subnet_id" {
+  description = "First private subnet ID (AZ1) — CCM places NLB here"
+  type        = string
+}
+
+variable "private_subnet_2_id" {
+  description = "Second private subnet ID (AZ2) — CCM places NLB here"
+  type        = string
 }
 
 # ── Route53 approach (commented out) ──

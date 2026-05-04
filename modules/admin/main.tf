@@ -48,7 +48,7 @@ resource "aws_iam_role_policy" "admin_ssm_policy" {
   })
 }
 
-# IAM Policy for Stage 2 Terraform — data source lookups needed by argocd module
+# IAM Policy for Stage 2 Terraform — argocd module creates ALB + registers NLB targets
 resource "aws_iam_role_policy" "admin_terraform_policy" {
   name = "${var.admin_name}-terraform-policy"
   role = aws_iam_role.admin_role.id
@@ -63,7 +63,25 @@ resource "aws_iam_role_policy" "admin_terraform_policy" {
           "ec2:DescribeVpcAttribute",
           "ec2:DescribeSubnets",
           "ec2:DescribeInstances",
-          "ec2:DescribeSecurityGroups"
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeNetworkInterfaces",
+          # Security group management for ALB
+          "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupEgress",
+          "ec2:CreateTags",
+          "ec2:DeleteTags"
+        ]
+        Resource = ["*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          # Full ELBv2 access — creates ALB, target groups, listeners, registers NLB IPs
+          "elasticloadbalancing:*"
         ]
         Resource = ["*"]
       }

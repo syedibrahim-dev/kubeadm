@@ -19,6 +19,11 @@ output "argocd_admin_password" {
   sensitive   = true
 }
 
+output "external_alb_dns" {
+  description = "External ALB DNS — internet-facing, routes app traffic via nginx ingress"
+  value       = aws_lb.external_alb.dns_name
+}
+
 # ── LBC approach: ALB/NLB hostnames from K8s data sources (commented out) ──
 # output "external_alb_hostname" {
 #   description = "External ALB DNS — internet-facing, routes all traffic via nginx ingress"

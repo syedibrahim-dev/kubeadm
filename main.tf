@@ -60,39 +60,32 @@ module "admin" {
   github_repo              = var.github_repo
 }
 
-# Loadbalancer Module — external ALB + internal NLB, fully Terraform-managed.
-# Runs in Stage 1 (from laptop) alongside VPC and compute.
-# ALB targets NLB private IPs (static). NLB targets worker nodes on NodePort 30080.
-# NLB health checks will show unhealthy until Stage 2 deploys nginx on the nodes.
-module "loadbalancer" {
-  source = "./modules/loadbalancer"
+# Loadbalancer Module — intentionally empty.
+# Internal NLB is now CCM-provisioned (nginx service type=LoadBalancer in Stage 2).
+# External ALB is created by module "argocd" after CCM provisions the NLB.
+# module "loadbalancer" { ... }  # commented out — all resources moved to modules/argocd
 
+# ArgoCD Module - Stage 2: runs automatically on the admin EC2 instance (inside VPC)
+# deploy_argocd defaults to false so this is skipped during local Stage 1 apply.
+# admin-setup.sh re-runs terraform with -var="deploy_argocd=true" from inside the VPC
+# where the K8s API server (10.0.x.x:6443) is reachable.
+# Stage 2 also creates the external ALB (after CCM provisions the internal NLB).
+module "argocd" {
+  count  = var.deploy_argocd ? 1 : 0
+  source = "./modules/argocd"
+
+  gitops_repo_url     = var.gitops_repo_url
+  gitops_branch       = var.gitops_branch
+  gitops_path         = var.gitops_path
+  app_namespace       = var.app_namespace
+  aws_region          = var.aws_region
+  cluster_name        = var.cluster_name
   vpc_id              = module.vpc.vpc_id
   vpc_cidr            = var.vpc.vpc_cidr
   public_subnet_id    = module.vpc.public_subnet_id
   public_subnet_2_id  = module.vpc.public_subnet_2_id
   private_subnet_id   = module.vpc.private_subnet_id
   private_subnet_2_id = module.vpc.private_subnet_2_id
-  worker_instance_ids = module.compute.worker_id
-  worker_count        = var.compute.worker_count
-  domain_name         = var.domain_name
-}
-
-# ArgoCD Module - Stage 2: runs automatically on the admin EC2 instance (inside VPC)
-# deploy_argocd defaults to false so this is skipped during local Stage 1 apply.
-# admin-setup.sh re-runs terraform with -var="deploy_argocd=true" from inside the VPC
-# where the K8s API server (10.0.x.x:6443) is reachable.
-module "argocd" {
-  count  = var.deploy_argocd ? 1 : 0
-  source = "./modules/argocd"
-
-  gitops_repo_url = var.gitops_repo_url
-  gitops_branch   = var.gitops_branch
-  gitops_path     = var.gitops_path
-  app_namespace   = var.app_namespace
-  aws_region      = var.aws_region
-  cluster_name    = var.cluster_name
-  nlb_private_ip  = module.loadbalancer.nlb_private_ip_az1
   # ── Route53 approach (commented out) ──
   # domain_name   = var.domain_name
 }

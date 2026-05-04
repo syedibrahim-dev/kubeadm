@@ -91,8 +91,9 @@ resource "null_resource" "pre_install_cleanup" {
 # ─────────────────────────────────────────────────────────────────────────────
 
 # nginx ingress controller — single controller for all HTTP routing.
-# NodePort :30080 is the fixed entry point for both the external ALB and
-# internal NLB (both managed by modules/loadbalancer via Terraform).
+# type=LoadBalancer: CCM (AWS cloud provider) watches this service and provisions
+# an internal NLB automatically in the private subnets. NodePort is assigned
+# dynamically — we don't manage it. Security group allows the full 30000-32767 range.
 # nginx routes based on URL path:
 #   /        → app pods (ClusterIP) — defined in GitOps repo Ingress resources
 #   /argocd  → argocd-server (ClusterIP)
@@ -110,37 +111,30 @@ resource "helm_release" "nginx_ingress" {
     yamlencode({
       controller = {
         service = {
-          type = "NodePort"
-          nodePorts = {
-            http  = 30080
-            https = 30443
+          type = "LoadBalancer"
+          annotations = {
+            "service.beta.kubernetes.io/aws-load-balancer-type"     = "nlb"
+            "service.beta.kubernetes.io/aws-load-balancer-internal" = "true"
+            "service.beta.kubernetes.io/aws-load-balancer-subnets"  = "${var.private_subnet_id},${var.private_subnet_2_id}"
           }
         }
       }
     })
   ]
 
-  # ── LBC approach: LoadBalancer type with NLB annotations (commented out) ──
+  # ── NodePort approach (commented out) ──
   # values = [
   #   yamlencode({
   #     controller = {
   #       service = {
-  #         type = "LoadBalancer"
+  #         type = "NodePort"
   #         nodePorts = { http = 30080, https = 30443 }
-  #         annotations = {
-  #           "service.beta.kubernetes.io/aws-load-balancer-type"             = "external"
-  #           "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "instance"
-  #           "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internal"
-  #           "service.beta.kubernetes.io/aws-load-balancer-name"            = "k8s-nginx-internal-nlb"
-  #         }
   #       }
   #     }
   #   })
   # ]
 
   depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
-  # ── LBC approach dependency (commented out) ──
-  # depends_on = [var.cluster_ready, null_resource.pre_install_cleanup, null_resource.wait_for_lbc_webhook]
 }
 
 # ArgoCD — ClusterIP service, accessed via internal NLB → nginx → /argocd path.
@@ -164,10 +158,11 @@ resource "helm_release" "argocd" {
       }
       configs = {
         params = {
-          # server.insecure: skip TLS since nginx terminates nothing and we have no cert yet
+          # server.insecure: skip TLS since nginx terminates TLS (no cert yet)
           "server.insecure" = true
-          # server.rootpath removed — ArgoCD now serves at / on its own domain
-          # (argocd.internal.kubeadm-demo.com) so no path prefix stripping needed
+          # server.rootpath: ArgoCD is served at /argocd via nginx path-based routing.
+          # This tells ArgoCD to prefix all asset URLs with /argocd so the UI loads correctly.
+          "server.rootpath" = "/argocd"
         }
       }
     })
@@ -239,20 +234,41 @@ resource "null_resource" "argocd_application" {
       metadata:
         name: argocd-server-ingress
         namespace: argocd
+        annotations:
+          # Rewrite /argocd → / before proxying to argocd-server.
+          # ArgoCD's server.rootpath=/argocd means it generates /argocd-prefixed
+          # asset URLs; nginx strips the prefix before forwarding to the pod.
+          nginx.ingress.kubernetes.io/rewrite-target: /$2
+          nginx.ingress.kubernetes.io/use-regex: "true"
+          # Restrict to VPC CIDR — ArgoCD is internal-only.
+          # Reachable via SSM tunnel to NLB (10.0.10.50:80) only.
+          nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/16"
       spec:
         ingressClassName: nginx
         rules:
-        - host: argocd.${var.nlb_private_ip}.nip.io
-          http:
+        - http:
             paths:
-            - path: /
-              pathType: Prefix
+            - path: /argocd(/|$)(.*)
+              pathType: ImplementationSpecific
               backend:
                 service:
                   name: argocd-server
                   port:
                     number: 80
-      # ── Route53 approach: use real internal domain (commented out) ──
+      # ── Host-based approach (nip.io) — commented out ──
+      # Requires modifying /etc/hosts on laptop to resolve argocd.<nlb-ip>.nip.io
+      # to 127.0.0.1 when using SSM port-forward tunnel.
+      # - host: argocd.${var.nlb_private_ip}.nip.io
+      #   http:
+      #     paths:
+      #     - path: /
+      #       pathType: Prefix
+      #       backend:
+      #         service:
+      #           name: argocd-server
+      #           port:
+      #             number: 80
+      # ── Route53 approach (commented out) ──
       # - host: argocd.internal.$${var.domain_name}
       #   http:
       #     paths:
@@ -280,3 +296,189 @@ resource "null_resource" "argocd_application" {
 #   metadata { name = "ingress-nginx-controller", namespace = "ingress-nginx" }
 #   depends_on = [helm_release.nginx_ingress]
 # }
+
+# ─────────────────────────────────────────────────────────
+# EXTERNAL ALB (Stage 2 — created after CCM provisions NLB)
+# CCM watches the nginx LoadBalancer service and provisions an internal NLB.
+# We wait for the NLB hostname, then create the external ALB and wire it up.
+# ─────────────────────────────────────────────────────────
+
+# Block until CCM assigns a hostname to the nginx LoadBalancer service.
+# CCM provisions the NLB asynchronously after the helm release completes.
+resource "null_resource" "wait_for_nlb" {
+  provisioner "local-exec" {
+    environment = { KUBECONFIG = "/home/ubuntu/.kube/config" }
+    command = <<-EOT
+      echo "Waiting for CCM to provision internal NLB for nginx ingress..."
+      for i in $(seq 1 60); do
+        HOSTNAME=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+        if [ -n "$HOSTNAME" ]; then
+          echo "NLB provisioned: $HOSTNAME"
+          exit 0
+        fi
+        echo "Waiting for NLB hostname... ($i/60)"
+        sleep 10
+      done
+      echo "ERROR: NLB hostname not assigned after 600s"
+      exit 1
+    EOT
+  }
+  depends_on = [helm_release.nginx_ingress]
+}
+
+# External ALB security group — accepts HTTP from internet, egresses to VPC only
+resource "aws_security_group" "alb_sg" {
+  name        = "k8s-external-alb-sg"
+  description = "Security group for internet-facing ALB"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow HTTP from internet"
+  }
+
+  egress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+    description = "Forward to internal NLB within VPC"
+  }
+
+  tags = { Name = "k8s-external-alb-sg" }
+}
+
+# External ALB — internet-facing, routes all traffic via nginx ingress (ALB → NLB → nginx → pods)
+resource "aws_lb" "external_alb" {
+  name               = "k8s-external-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = [var.public_subnet_id, var.public_subnet_2_id]
+
+  tags = { Name = "k8s-external-alb" }
+
+  # Wait for NLB to be provisioned before creating ALB (ordering clarity — ALB
+  # target registration depends on NLB IPs which are discovered after this wait)
+  depends_on = [null_resource.wait_for_nlb]
+}
+
+# ALB target group — type:ip, targets the CCM-provisioned NLB's private IPs.
+# IPs are registered by null_resource.register_nlb_targets below.
+resource "aws_lb_target_group" "alb_nlb" {
+  name        = "k8s-alb-nlb-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    protocol            = "HTTP"
+    path                = "/"
+    port                = "80"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    interval            = 15
+    matcher             = "200-404"
+  }
+
+  tags = { Name = "k8s-alb-nlb-tg" }
+}
+
+# ALB listener — forwards all HTTP traffic to NLB target group
+resource "aws_lb_listener" "alb_http" {
+  load_balancer_arn = aws_lb.external_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.alb_nlb.arn
+  }
+}
+
+# Block /argocd* at the internet-facing ALB — ArgoCD is VPC-internal only.
+# Access ArgoCD via SSM port-forward tunnel to NLB hostname:80, not through ALB.
+resource "aws_lb_listener_rule" "block_argocd_path" {
+  listener_arn = aws_lb_listener.alb_http.arn
+  priority     = 1
+
+  action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Not Found"
+      status_code  = "404"
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = ["/argocd", "/argocd/*"]
+    }
+  }
+}
+
+# Discover CCM NLB private IPs and register them in the ALB target group.
+# CCM provisions the NLB dynamically — IPs are unknown at plan time, so we
+# use AWS CLI after provisioning instead of a Terraform data source.
+# Primary method: AvailabilityZones[].LoadBalancerAddresses[].PrivateIPv4Address
+# Fallback: ENI description filter (ELB net/<name>/<id>)
+resource "null_resource" "register_nlb_targets" {
+  triggers = {
+    alb_tg_arn = aws_lb_target_group.alb_nlb.arn
+  }
+
+  provisioner "local-exec" {
+    environment = {
+      KUBECONFIG = "/home/ubuntu/.kube/config"
+      AWS_REGION = var.aws_region
+      TG_ARN     = aws_lb_target_group.alb_nlb.arn
+    }
+    command = <<-EOT
+      echo "Discovering CCM-provisioned NLB..."
+      NLB_DNS=$(kubectl get svc ingress-nginx-controller -n ingress-nginx \
+        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      echo "NLB DNS: $NLB_DNS"
+
+      NLB_ARN=$(aws elbv2 describe-load-balancers \
+        --region "$AWS_REGION" \
+        --query "LoadBalancers[?DNSName=='$NLB_DNS'].LoadBalancerArn" \
+        --output text)
+      echo "NLB ARN: $NLB_ARN"
+
+      # Primary: private IPs from describe-load-balancers (works for internal NLBs)
+      NLB_IPS=$(aws elbv2 describe-load-balancers \
+        --load-balancer-arns "$NLB_ARN" \
+        --region "$AWS_REGION" \
+        --query "LoadBalancers[0].AvailabilityZones[*].LoadBalancerAddresses[*].PrivateIPv4Address" \
+        --output text)
+
+      if [ -z "$NLB_IPS" ]; then
+        echo "Primary method returned no IPs, trying ENI fallback..."
+        LB_ID=$(echo "$NLB_ARN" | awk -F'loadbalancer/' '{print $2}')
+        NLB_IPS=$(aws ec2 describe-network-interfaces \
+          --region "$AWS_REGION" \
+          --filters "Name=description,Values=ELB $LB_ID" \
+          --query "NetworkInterfaces[*].PrivateIpAddress" \
+          --output text)
+      fi
+
+      echo "NLB private IPs: $NLB_IPS"
+      for IP in $NLB_IPS; do
+        echo "Registering $IP in ALB target group..."
+        aws elbv2 register-targets \
+          --region "$AWS_REGION" \
+          --target-group-arn "$TG_ARN" \
+          --targets Id=$IP,Port=80
+      done
+      echo "NLB target registration complete."
+    EOT
+  }
+
+  depends_on = [aws_lb_target_group.alb_nlb, null_resource.wait_for_nlb]
+}
