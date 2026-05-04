@@ -55,7 +55,7 @@ resource "aws_security_group" "k8s_nodes_sg" {
     to_port     = 32767
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
-    description = "Allow K8s NodePort range from VPC CIDR (CCM-provisioned NLB → nginx)"
+    description = "Allow K8s NodePort range from VPC CIDR (CCM-provisioned NLB to nginx)"
   }
 
   # Allow all outbound traffic (for SSM agent, downloading packages via NAT)
