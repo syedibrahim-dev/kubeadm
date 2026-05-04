@@ -110,6 +110,25 @@ resource "null_resource" "pre_destroy_cleanup" {
         --parameters '{"commands":["kubectl patch app k8s-app -n argocd -p \"{\\\"spec\\\":{\\\"syncPolicy\\\":null}}\" --type=merge 2>/dev/null || true"]}' \
         --region "${self.triggers.aws_region}" \
         --output text 2>/dev/null || true
+
+      echo "Pre-destroy: deleting ingress-nginx namespace so CCM cleans up the NLB before nodes are destroyed..."
+      COMMAND_ID=$(aws ssm send-command \
+        --instance-ids "${self.triggers.admin_instance_id}" \
+        --document-name "AWS-RunShellScript" \
+        --parameters '{"commands":["kubectl delete namespace ingress-nginx --ignore-not-found --timeout=180s 2>/dev/null || true"]}' \
+        --region "${self.triggers.aws_region}" \
+        --query "Command.CommandId" \
+        --output text 2>/dev/null)
+
+      if [ -n "$COMMAND_ID" ]; then
+        echo "Waiting for NLB deletion to complete (SSM command: $COMMAND_ID)..."
+        aws ssm wait command-executed \
+          --command-id "$COMMAND_ID" \
+          --instance-id "${self.triggers.admin_instance_id}" \
+          --region "${self.triggers.aws_region}" 2>/dev/null || true
+        echo "NLB cleanup complete."
+      fi
+
       echo "Pre-destroy cleanup done."
     EOT
   }
