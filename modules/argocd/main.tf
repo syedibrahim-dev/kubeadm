@@ -258,7 +258,7 @@ resource "null_resource" "argocd_application" {
       # ── Host-based approach (nip.io) — commented out ──
       # Requires modifying /etc/hosts on laptop to resolve argocd.<nlb-ip>.nip.io
       # to 127.0.0.1 when using SSM port-forward tunnel.
-      # - host: argocd.${var.nlb_private_ip}.nip.io
+      # - host: argocd.$${nlb_private_ip}.nip.io
       #   http:
       #     paths:
       #     - path: /
