@@ -14,7 +14,7 @@ cp ~/.kube/config .terraform/kubeconfig
 chmod 600 .terraform/kubeconfig
 
 terraform init
-terraform apply -var="deploy_argocd=true" -target='module.argocd[0]' -auto-approve
+terraform apply -var="stage2={deploy_argocd=true}" -target='module.argocd[0]' -auto-approve
 
 echo ""
 echo "Deployment complete!"

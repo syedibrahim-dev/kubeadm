@@ -201,7 +201,7 @@ chmod 600 .terraform/kubeconfig
 
 # Initialize Terraform and deploy only the ArgoCD module
 terraform init
-terraform apply -var="deploy_argocd=true" -target='module.argocd[0]' -auto-approve
+terraform apply -var="stage2={deploy_argocd=true}" -target='module.argocd[0]' -auto-approve
 
 echo ""
 echo "ArgoCD deployment complete!"
@@ -307,7 +307,7 @@ chown -R ubuntu:ubuntu /home/ubuntu/kubeadm-infra/.terraform
 chmod 600 /home/ubuntu/kubeadm-infra/.terraform/kubeconfig
 
 # Run as ubuntu user
-if su - ubuntu -c "cd /home/ubuntu/kubeadm-infra && terraform init && terraform apply -var='deploy_argocd=true' -target='module.argocd[0]' -auto-approve" >> /var/log/argocd-deploy.log 2>&1; then
+if su - ubuntu -c "cd /home/ubuntu/kubeadm-infra && terraform init && terraform apply -var='stage2={deploy_argocd=true}' -target='module.argocd[0]' -auto-approve" >> /var/log/argocd-deploy.log 2>&1; then
     echo "ArgoCD deployment completed successfully!"
     echo "ArgoCD deployed at $(date)" >> /home/ubuntu/admin-setup-complete.txt
     

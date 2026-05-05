@@ -14,7 +14,7 @@ output "admin_private_ip" {
 # Primary Access Command
 output "admin_access_command" {
   description = "AWS SSM command to access Admin kubectl management instance"
-  value       = "aws ssm start-session --target ${module.admin.admin_instance_id} --region ${var.aws_region}"
+  value       = "aws ssm start-session --target ${module.admin.admin_instance_id} --region ${var.core.aws_region}"
 }
 
 # Private IPs of K8s Nodes
@@ -44,13 +44,13 @@ output "worker_count" {
 }
 
 output "external_alb_dns" {
-  description = "External ALB DNS — available after Stage 2 (deploy_argocd=true)"
-  value       = var.deploy_argocd ? module.argocd[0].external_alb_dns : "Available after Stage 2 (deploy_argocd=true)"
+  description = "External ALB DNS — available after Stage 2 (stage2.deploy_argocd=true)"
+  value       = var.stage2.deploy_argocd ? module.argocd[0].external_alb_dns : "Available after Stage 2 (stage2.deploy_argocd=true)"
 }
 
 output "argocd_admin_password" {
   description = "ArgoCD initial admin password"
-  value       = var.deploy_argocd ? module.argocd[0].argocd_admin_password : "Available after Stage 2 (deploy_argocd=true)"
+  value       = var.stage2.deploy_argocd ? module.argocd[0].argocd_admin_password : "Available after Stage 2 (stage2.deploy_argocd=true)"
   sensitive   = true
 }
 
@@ -93,7 +93,7 @@ output "argocd_access_info" {
 
 output "setup_instructions" {
   description = "Quick setup instructions"
-  value = (var.enable_auto_setup ? <<-EOT
+  value = (var.automation.enable_auto_setup ? <<-EOT
 
     ═══════════════════════════════════════════════════════════
     CLUSTER INFORMATION
@@ -118,7 +118,7 @@ output "setup_instructions" {
     - Proper IAM permissions for SSM
 
     Connect to Admin Instance:
-      ${format("aws ssm start-session --target %s --region %s", module.admin.admin_instance_id, var.aws_region)}
+      ${format("aws ssm start-session --target %s --region %s", module.admin.admin_instance_id, var.core.aws_region)}
 
     Run kubectl commands (kubeconfig already configured):
 
@@ -139,13 +139,13 @@ output "setup_instructions" {
     ═══════════════════════════════════════════════════════════
 
     Access Control Plane (for troubleshooting):
-      ${format("aws ssm start-session --target %s --region %s", module.compute.control_plane_id, var.aws_region)}
+      ${format("aws ssm start-session --target %s --region %s", module.compute.control_plane_id, var.core.aws_region)}
 
     Monitor control plane setup logs:
       sudo tail -f /var/log/k8s-setup.log
 
     Access Worker Nodes (for troubleshooting):
-      ${join("\n      ", [for id in module.compute.worker_id : format("aws ssm start-session --target %s --region %s", id, var.aws_region)])}
+      ${join("\n      ", [for id in module.compute.worker_id : format("aws ssm start-session --target %s --region %s", id, var.core.aws_region)])}
 
   EOT
     : <<-EOT

@@ -1,5 +1,5 @@
 provider "aws" {
-  region = var.aws_region
+  region = var.core.aws_region
 }
 
 # Helm, Kubernetes, and kubectl providers all use the same kubeconfig.

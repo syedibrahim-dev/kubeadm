@@ -1,19 +1,18 @@
 # Root variables — all hardcoded values in scripts and modules are driven from here.
 
-variable "aws_region" {
-  description = "AWS region to deploy resources"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "cluster_name" {
-  description = "Kubernetes cluster name — used in AWS resource tags and CCM configuration"
-  type        = string
-  default     = "kubeadm-cluster"
+variable "core" {
+  description = "Global AWS and cluster settings"
+  type = object({
+    aws_region   = string
+    cluster_name = string
+  })
+  default = {
+    aws_region   = "us-east-1"
+    cluster_name = "kubeadm-cluster"
+  }
 }
 
 # ── Networking ─────────────────────────────────────────────────────────────────
-
 variable "vpc" {
   description = "VPC and subnet CIDR configuration"
   type = object({
@@ -100,20 +99,24 @@ variable "gitops" {
 
 # ── Automation ─────────────────────────────────────────────────────────────────
 
-variable "enable_auto_setup" {
-  description = "Run Kubernetes setup scripts automatically via cloud-init on first boot"
-  type        = bool
-  default     = true
+variable "automation" {
+  description = "Automation toggles for setup and deployment"
+  type = object({
+    enable_auto_setup  = bool
+    enable_auto_deploy = bool
+  })
+  default = {
+    enable_auto_setup  = true
+    enable_auto_deploy = true
+  }
 }
 
-variable "enable_auto_deploy" {
-  description = "Automatically deploy ArgoCD (Stage 2) after cluster is ready"
-  type        = bool
-  default     = true
-}
-
-variable "deploy_argocd" {
-  description = "Stage 2 gate — set to true only when running from the admin EC2 inside the VPC. The K8s API (10.x.x.x:6443) is unreachable from outside."
-  type        = bool
-  default     = false
+variable "stage2" {
+  description = "Stage 2 gate for ArgoCD deployment"
+  type = object({
+    deploy_argocd = bool
+  })
+  default = {
+    deploy_argocd = false
+  }
 }
