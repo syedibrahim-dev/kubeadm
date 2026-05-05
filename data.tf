@@ -1,17 +1,12 @@
-# Data Sources
-
-# Get Current AWS Account Identity (for unique bucket naming)
-data "aws_caller_identity" "current" {}
-
 # Get Available Availability Zones
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Find the Latest Ubuntu 22.04 AMI
+# Latest Ubuntu 22.04 LTS AMI (Canonical)
 data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["099720109477"]
+  owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"

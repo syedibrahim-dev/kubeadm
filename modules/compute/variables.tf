@@ -11,7 +11,7 @@ variable "control_plane_instance_type" {
 }
 
 variable "worker_instance_type" {
-  description = "Instance type for worker node"
+  description = "Instance type for worker nodes"
   type        = string
 }
 
@@ -32,43 +32,58 @@ variable "security_group_id" {
 }
 
 variable "control_plane_private_ip" {
-  description = "Fixed private IP for control plane"
+  description = "Fixed private IP for the control plane node"
   type        = string
 }
 
 variable "control_plane_name" {
-  description = "Name tag for control plane instance"
+  description = "Name tag for the control plane instance"
   type        = string
 }
 
 variable "worker_name" {
-  description = "Name tag for worker instance"
+  description = "Name tag prefix for worker instances"
   type        = string
 }
 
+variable "volume_size" {
+  description = "Root EBS volume size in GB"
+  type        = number
+  default     = 20
+}
+
 variable "enable_auto_setup" {
-  description = "Enable automatic Kubernetes setup via user_data scripts"
+  description = "Run Kubernetes setup scripts via cloud-init on first boot"
   type        = bool
   default     = true
 }
 
 variable "aws_region" {
-  description = "AWS region for SSM Parameter Store"
-  type        = string
-}
-
-variable "volume_size" {
-  description = "Root EBS volume size in GB for K8s nodes"
-  type        = number
-  default     = 20
-}
-
-variable "nat_gateway_id" {
-  description = "NAT Gateway ID for explicit dependency - ensures NAT is ready before instances start"
+  description = "AWS region — used for SSM Parameter Store paths"
   type        = string
 }
 
 variable "cluster_name" {
-  description = "Kubernetes cluster name — used in AWS resource tags"
+  description = "Kubernetes cluster name — used in AWS resource tags and CCM args"
+  type        = string
+}
+
+variable "k8s_version" {
+  description = "Kubernetes version to install (e.g. '1.31')"
+  type        = string
+}
+
+variable "pod_subnet_cidr" {
+  description = "CIDR block for the Kubernetes pod network (Calico + kubeadm podSubnet)"
+  type        = string
+}
+
+variable "ccm_version" {
+  description = "AWS Cloud Controller Manager image version (e.g. 'v1.31.1')"
+  type        = string
+}
+
+variable "nat_gateway_id" {
+  description = "NAT Gateway ID — explicit dependency ensures NAT is ready before instances boot"
   type        = string
 }

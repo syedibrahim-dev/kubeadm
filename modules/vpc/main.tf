@@ -1,27 +1,26 @@
 # VPC Module - Network Infrastructure
 
-# Custom VPC for Private Kubernetes Cluster
+locals {
+  cluster_tag = "kubernetes.io/cluster/${var.cluster_name}"
+}
+
 resource "aws_vpc" "k8s_vpc" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
 
   tags = {
-    Name                                  = "k8s-private-vpc"
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    Name                    = "k8s-private-vpc"
+    (local.cluster_tag)     = "owned"
   }
 }
 
-# Internet Gateway for Public Subnet
 resource "aws_internet_gateway" "k8s_igw" {
   vpc_id = aws_vpc.k8s_vpc.id
 
-  tags = {
-    Name = "k8s-igw"
-  }
+  tags = { Name = "k8s-igw" }
 }
 
-# Public Subnet (for Bastion and NAT Gateway)
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.k8s_vpc.id
   cidr_block              = var.public_subnet_cidr
@@ -29,49 +28,42 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                  = "k8s-public-subnet"
-    "kubernetes.io/role/elb"              = "1"
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    Name                    = "k8s-public-subnet"
+    "kubernetes.io/role/elb" = "1"
+    (local.cluster_tag)      = "owned"
   }
 }
 
-# Private Subnet (for K8s nodes)
 resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.k8s_vpc.id
   cidr_block        = var.private_subnet_cidr
   availability_zone = var.availability_zone
 
   tags = {
-    Name                                  = "k8s-private-subnet"
-    "kubernetes.io/role/internal-elb"     = "1"
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    Name                             = "k8s-private-subnet"
+    "kubernetes.io/role/internal-elb" = "1"
+    (local.cluster_tag)               = "owned"
   }
 }
 
-# Elastic IP for NAT Gateway
 resource "aws_eip" "nat" {
   domain = "vpc"
 
-  tags = {
-    Name = "k8s-nat-eip"
-  }
+  tags = { Name = "k8s-nat-eip" }
 
   depends_on = [aws_internet_gateway.k8s_igw]
 }
 
-# NAT Gateway (allows private instances to access internet)
 resource "aws_nat_gateway" "k8s_nat" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public.id
 
-  tags = {
-    Name = "k8s-nat-gateway"
-  }
+  tags = { Name = "k8s-nat-gateway" }
 
   depends_on = [aws_internet_gateway.k8s_igw]
 }
 
-# Second Public Subnet in AZ2 — ALB requires subnets in at least 2 AZs
+# Second public subnet in AZ2 — ALB requires subnets in at least 2 AZs
 resource "aws_subnet" "public_2" {
   vpc_id                  = aws_vpc.k8s_vpc.id
   cidr_block              = var.public_subnet_2_cidr
@@ -79,26 +71,25 @@ resource "aws_subnet" "public_2" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                                    = "k8s-public-subnet-2"
-    "kubernetes.io/role/elb"                = "1"
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    Name                    = "k8s-public-subnet-2"
+    "kubernetes.io/role/elb" = "1"
+    (local.cluster_tag)      = "owned"
   }
 }
 
-# Second Private Subnet in AZ2 — ALB requires subnets in at least 2 AZs
+# Second private subnet in AZ2 — NLB and ALB require multi-AZ subnets
 resource "aws_subnet" "private_2" {
   vpc_id            = aws_vpc.k8s_vpc.id
   cidr_block        = var.private_subnet_2_cidr
   availability_zone = var.availability_zone_2
 
   tags = {
-    Name                                    = "k8s-private-subnet-2"
-    "kubernetes.io/role/internal-elb"       = "1"
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    Name                             = "k8s-private-subnet-2"
+    "kubernetes.io/role/internal-elb" = "1"
+    (local.cluster_tag)               = "owned"
   }
 }
 
-# Route Table for Public Subnet
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.k8s_vpc.id
 
@@ -107,12 +98,9 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.k8s_igw.id
   }
 
-  tags = {
-    Name = "k8s-public-rt"
-  }
+  tags = { Name = "k8s-public-rt" }
 }
 
-# Route Table for Private Subnet
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.k8s_vpc.id
 
@@ -121,24 +109,19 @@ resource "aws_route_table" "private" {
     nat_gateway_id = aws_nat_gateway.k8s_nat.id
   }
 
-  tags = {
-    Name = "k8s-private-rt"
-  }
+  tags = { Name = "k8s-private-rt" }
 }
 
-# Associate Public Route Table with Public Subnet
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
 
-# Associate Private Route Table with Private Subnet
 resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private.id
   route_table_id = aws_route_table.private.id
 }
 
-# Associate route tables with AZ2 subnets
 resource "aws_route_table_association" "public_2" {
   subnet_id      = aws_subnet.public_2.id
   route_table_id = aws_route_table.public.id

@@ -1,7 +1,9 @@
 
-# AWS Configuration
-aws_region   = "us-east-1"
-cluster_name = "kubeadm-cluster"  
+# Core Configuration
+core = {
+  aws_region   = "us-east-1"
+  cluster_name = "kubeadm-cluster"
+}
 
 # VPC Configuration
 vpc = {
@@ -14,8 +16,8 @@ vpc = {
 
 # Compute Configuration
 compute = {
-  control_plane_instance_type = "t3.small"  
-  worker_instance_type        = "t3.medium"  
+  control_plane_instance_type = "t3.medium"
+  worker_instance_type        = "t3.medium"
   worker_count                = 1
   control_plane_private_ip    = "10.0.10.100"
   control_plane_name          = "K8s-Control-Plane"
@@ -30,7 +32,12 @@ admin = {
 }
 
 # Automation Configuration
-enable_auto_setup = true
+automation = {
+  enable_auto_setup  = true
+  enable_auto_deploy = true
+}
 
-# Domain Configuration
-domain_name = "kubeadm-demo.com"
+# Stage 2 Configuration
+stage2 = {
+  deploy_argocd = false
+}

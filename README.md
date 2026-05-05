@@ -85,7 +85,7 @@ terraform apply
               │
               │  1. Fetches kubeconfig from SSM Parameter Store
               │  2. Waits for all nodes Ready + CCM taint cleared
-              │  3. terraform apply -var="deploy_argocd=true" -target='module.argocd[0]'
+              │  3. terraform apply -var="stage2={deploy_argocd=true}" -target='module.argocd[0]'
               │         │
               │         ├──► Helm ──► ingress-nginx (type: LoadBalancer)
               │         │               └──► CCM detects service → provisions internal NLB
@@ -262,7 +262,7 @@ Creates: VPC (4 subnets across 2 AZs), NAT gateway, security groups, all EC2 ins
 1. Waits for the control plane to finish bootstrapping
 2. Fetches kubeconfig from AWS SSM Parameter Store
 3. Copies kubeconfig to `.terraform/kubeconfig`
-4. Runs `terraform apply -var="deploy_argocd=true" -target='module.argocd[0]'`
+4. Runs `terraform apply -var="stage2={deploy_argocd=true}" -target='module.argocd[0]'`
 
 The admin EC2 is inside the VPC so it can reach `10.0.10.100:6443` directly.
 

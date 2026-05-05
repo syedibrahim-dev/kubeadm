@@ -1,20 +1,21 @@
-# Variables for Kubernetes Cluster Infrastructure - Modular Structure
+# Root variables — all hardcoded values in scripts and modules are driven from here.
 
-variable "aws_region" {
-  description = "AWS region to deploy resources"
-  type        = string
-  default     = "us-east-1"
+variable "core" {
+  description = "Global AWS and cluster settings"
+  type = object({
+    aws_region   = string
+    cluster_name = string
+  })
+  default = {
+    aws_region   = "us-east-1"
+    cluster_name = "kubeadm-cluster"
+  }
 }
 
-variable "cluster_name" {
-  description = "Kubernetes cluster name — used in AWS resource tags and LBC configuration"
-  type        = string
-  default     = "kubeadm-cluster"
-}
+# ── Networking ─────────────────────────────────────────────────────────────────
 
-# VPC Configuration
 variable "vpc" {
-  description = "VPC and network configuration"
+  description = "VPC and subnet CIDR configuration"
   type = object({
     vpc_cidr              = string
     public_subnet_cidr    = string
@@ -31,9 +32,10 @@ variable "vpc" {
   }
 }
 
-# Compute Configuration
+# ── Compute ────────────────────────────────────────────────────────────────────
+
 variable "compute" {
-  description = "Kubernetes nodes configuration"
+  description = "Kubernetes node and cluster configuration"
   type = object({
     control_plane_instance_type = string
     worker_instance_type        = string
@@ -42,6 +44,9 @@ variable "compute" {
     control_plane_name          = string
     worker_name                 = string
     volume_size                 = number
+    k8s_version                 = string
+    ccm_version                 = string
+    pod_subnet_cidr             = string
   })
   default = {
     control_plane_instance_type = "t3.medium"
@@ -51,74 +56,68 @@ variable "compute" {
     control_plane_name          = "K8s-Control-Plane"
     worker_name                 = "K8s-Worker"
     volume_size                 = 20
+    k8s_version                 = "1.31"
+    ccm_version                 = "v1.31.1"
+    pod_subnet_cidr             = "192.168.0.0/16"
   }
 }
 
-# Admin Instance Configuration
+# ── Admin ──────────────────────────────────────────────────────────────────────
+
 variable "admin" {
   description = "Admin kubectl management instance configuration"
   type = object({
-    instance_type = string
-    admin_name    = string
+    instance_type     = string
+    admin_name        = string
+    terraform_version = string
   })
   default = {
-    instance_type = "t3.micro"
-    admin_name    = "K8s-Admin"
+    instance_type     = "t3.micro"
+    admin_name        = "K8s-Admin"
+    terraform_version = "1.10.5"
   }
 }
 
-# Automation Configuration
-variable "enable_auto_setup" {
-  description = "Enable automatic Kubernetes installation and setup via user_data scripts"
-  type        = bool
-  default     = true
+# ── GitOps / ArgoCD ────────────────────────────────────────────────────────────
+
+variable "gitops" {
+  description = "GitOps repository and ArgoCD application configuration"
+  type = object({
+    github_repo   = string
+    repo_url      = string
+    branch        = string
+    path          = string
+    app_namespace = string
+  })
+  default = {
+    github_repo   = "syedibrahim-dev/kubeadm"
+    repo_url      = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
+    branch        = "main"
+    path          = "k8s-app/overlays/production"
+    app_namespace = "test-app"
+  }
 }
 
-variable "enable_auto_deploy" {
-  description = "Enable automatic deployment of ArgoCD and applications after cluster is ready"
-  type        = bool
-  default     = true
+# ── Automation ─────────────────────────────────────────────────────────────────
+
+variable "automation" {
+  description = "Automation toggles for setup and deployment"
+  type = object({
+    enable_auto_setup  = bool
+    enable_auto_deploy = bool
+  })
+  default = {
+    enable_auto_setup  = true
+    enable_auto_deploy = true
+  }
 }
 
-variable "deploy_argocd" {
-  description = "Stage 2 gate: set to true only when running from the admin EC2 inside the VPC. Never set true locally — the K8s API server is unreachable from outside the VPC."
-  type        = bool
-  default     = false
-}
-
-variable "github_repo" {
-  description = "GitHub repository for bootstrap files (format: owner/repo)"
-  type        = string
-  default     = "syedibrahim-dev/kubeadm"
-}
-
-# GitOps Configuration
-variable "gitops_repo_url" {
-  description = "GitOps repository URL for ArgoCD to watch"
-  type        = string
-  default     = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
-}
-
-variable "gitops_branch" {
-  description = "Branch to watch in GitOps repository"
-  type        = string
-  default     = "main"
-}
-
-variable "gitops_path" {
-  description = "Path inside the GitOps repository that ArgoCD watches"
-  type        = string
-  default     = "k8s-app/overlays/production"
-}
-
-variable "app_namespace" {
-  description = "Namespace where application will be deployed"
-  type        = string
-  default     = "test-app"
-}
-
-variable "domain_name" {
-  description = "Base domain name — public zone: app/api subdomains, private zone: argocd.internal subdomain"
-  type        = string
-  default     = "kubeadm-demo.com"
+variable "stage2" {
+  description = "Stage 2 gate for ArgoCD deployment"
+  type = object({
+    deploy_argocd = bool
+  })
+  default = {
+    deploy_argocd = false
+  }
 }

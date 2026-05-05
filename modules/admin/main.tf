@@ -127,12 +127,14 @@ resource "aws_instance" "admin" {
   iam_instance_profile   = aws_iam_instance_profile.admin_profile.name
 
   user_data = var.enable_auto_setup ? templatefile("${path.root}/scripts/admin-setup.sh", {
-    aws_region           = var.aws_region
-    control_plane_name   = var.control_plane_name
-    control_plane_ip     = var.control_plane_private_ip
-    github_repo          = var.github_repo
-    enable_auto_deploy   = var.enable_auto_deploy
-    worker_count         = var.worker_count
+    aws_region         = var.aws_region
+    control_plane_name = var.control_plane_name
+    control_plane_ip   = var.control_plane_private_ip
+    github_repo        = var.github_repo
+    enable_auto_deploy = var.enable_auto_deploy
+    worker_count       = var.worker_count
+    k8s_version        = var.k8s_version
+    terraform_version  = var.terraform_version
   }) : null
 
   tags = {

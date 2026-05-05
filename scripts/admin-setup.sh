@@ -30,17 +30,17 @@ apt-get update
 apt-get install -y apt-transport-https ca-certificates curl gpg awscli unzip git
 
 # Install Terraform for ArgoCD deployment
-echo "Installing Terraform..."
-wget -q https://releases.hashicorp.com/terraform/1.10.5/terraform_1.10.5_linux_amd64.zip
-unzip -q terraform_1.10.5_linux_amd64.zip -d /usr/local/bin/
-rm terraform_1.10.5_linux_amd64.zip
+echo "Installing Terraform ${terraform_version}..."
+wget -q https://releases.hashicorp.com/terraform/${terraform_version}/terraform_${terraform_version}_linux_amd64.zip
+unzip -q terraform_${terraform_version}_linux_amd64.zip -d /usr/local/bin/
+rm terraform_${terraform_version}_linux_amd64.zip
 chmod +x /usr/local/bin/terraform
 terraform --version
 
 # Add Kubernetes repository
 mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v${k8s_version}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${k8s_version}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
 
 # Install kubectl only (no kubelet or kubeadm needed)
 apt-get update
@@ -201,7 +201,7 @@ chmod 600 .terraform/kubeconfig
 
 # Initialize Terraform and deploy only the ArgoCD module
 terraform init
-terraform apply -var="deploy_argocd=true" -target='module.argocd[0]' -auto-approve
+terraform apply -var="stage2={deploy_argocd=true}" -target='module.argocd[0]' -auto-approve
 
 echo ""
 echo "ArgoCD deployment complete!"
@@ -307,7 +307,7 @@ chown -R ubuntu:ubuntu /home/ubuntu/kubeadm-infra/.terraform
 chmod 600 /home/ubuntu/kubeadm-infra/.terraform/kubeconfig
 
 # Run as ubuntu user
-if su - ubuntu -c "cd /home/ubuntu/kubeadm-infra && terraform init && terraform apply -var='deploy_argocd=true' -target='module.argocd[0]' -auto-approve" >> /var/log/argocd-deploy.log 2>&1; then
+if su - ubuntu -c "cd /home/ubuntu/kubeadm-infra && terraform init && terraform apply -var='stage2={deploy_argocd=true}' -target='module.argocd[0]' -auto-approve" >> /var/log/argocd-deploy.log 2>&1; then
     echo "ArgoCD deployment completed successfully!"
     echo "ArgoCD deployed at $(date)" >> /home/ubuntu/admin-setup-complete.txt
     

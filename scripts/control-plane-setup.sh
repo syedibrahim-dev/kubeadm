@@ -47,8 +47,8 @@ apt-get install -y apt-transport-https ca-certificates curl gpg conntrack awscli
 
 # Add Kubernetes repository
 mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v${k8s_version}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${k8s_version}/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
 
 # Install kubeadm, kubelet, kubectl
 apt-get update
@@ -112,7 +112,7 @@ apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
 controlPlaneEndpoint: "$CONTROL_PLANE_IP"
 networking:
-  podSubnet: "192.168.0.0/16"
+  podSubnet: "${pod_subnet_cidr}"
 apiServer:
   extraArgs:
     cloud-provider: external
@@ -255,11 +255,11 @@ spec:
       priorityClassName: system-cluster-critical
       containers:
         - name: aws-cloud-controller-manager
-          image: registry.k8s.io/provider-aws/cloud-controller-manager:v1.31.1
+          image: registry.k8s.io/provider-aws/cloud-controller-manager:${ccm_version}
           args:
             - --v=2
             - --cloud-provider=aws
-            - --cluster-name=kubeadm-cluster
+            - --cluster-name=${cluster_name}
             - --configure-cloud-routes=false
           resources:
             requests:
