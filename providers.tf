@@ -1,13 +1,10 @@
-# AWS Provider Configuration
-
 provider "aws" {
   region = var.aws_region
 }
 
-provider "null" {}
-
-# Helm and Kubernetes providers use dynamically fetched kubeconfig
-# During destroy, if kubeconfig doesn't exist, use dummy config to avoid errors
+# Helm, Kubernetes, and kubectl providers all use the same kubeconfig.
+# During Stage 1 (laptop) the file doesn't exist yet — fall back to a dummy
+# path so provider init doesn't error before the cluster is created.
 locals {
   kubeconfig_path = fileexists("${path.root}/.terraform/kubeconfig") ? "${path.root}/.terraform/kubeconfig" : "${path.root}/.terraform/dummy-kubeconfig"
 }
@@ -22,15 +19,16 @@ provider "kubernetes" {
   config_path = local.kubeconfig_path
 }
 
+provider "kubectl" {
+  config_path      = local.kubeconfig_path
+  load_config_file = fileexists(local.kubeconfig_path)
+}
+
 terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
-    }
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.0"
     }
     helm = {
       source  = "hashicorp/helm"
@@ -39,6 +37,14 @@ terraform {
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "~> 2.35"
+    }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.14"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
     }
   }
 }

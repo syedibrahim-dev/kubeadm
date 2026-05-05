@@ -1,19 +1,60 @@
+# ArgoCD Module Variables
+
 variable "aws_region" {
-  description = "AWS region — required by AWS Load Balancer Controller"
+  description = "AWS region"
   type        = string
 }
 
 variable "cluster_name" {
-  description = "Kubernetes cluster name — required by AWS Load Balancer Controller"
+  description = "Kubernetes cluster name — used in data source tag filters"
   type        = string
   default     = "kubeadm-cluster"
 }
 
 variable "cluster_ready" {
-  description = "Dependency to ensure cluster is ready before deploying ArgoCD"
+  description = "Dependency token — set to admin module output to sequence Stage 2 after cluster is up"
   type        = any
   default     = null
 }
+
+variable "vpc_cidr" {
+  description = "VPC CIDR block — used in nginx whitelist-source-range to restrict ArgoCD to VPC-only access"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+# ── NLB pinned IPs ────────────────────────────────────────────────────────────
+# CCM uses these IPs when provisioning the internal NLB, so they are known at
+# plan time and can be registered as ALB targets via pure Terraform (no CLI).
+# Choose unused IPs from each private subnet CIDR.
+
+variable "nlb_ip_az1" {
+  description = "Pinned private IP for the NLB in AZ1 private subnet (10.0.10.0/24)"
+  type        = string
+  default     = "10.0.10.50"
+}
+
+variable "nlb_ip_az2" {
+  description = "Pinned private IP for the NLB in AZ2 private subnet (10.0.11.0/24)"
+  type        = string
+  default     = "10.0.11.50"
+}
+
+# ── Helm chart versions ───────────────────────────────────────────────────────
+
+variable "nginx_chart_version" {
+  description = "ingress-nginx Helm chart version"
+  type        = string
+  default     = "4.10.1"
+}
+
+variable "argocd_chart_version" {
+  description = "argo-cd Helm chart version"
+  type        = string
+  default     = "7.7.11"
+}
+
+# ── GitOps / Application ──────────────────────────────────────────────────────
 
 variable "gitops_repo_url" {
   description = "GitOps repository URL for ArgoCD to watch"
@@ -22,13 +63,13 @@ variable "gitops_repo_url" {
 }
 
 variable "gitops_branch" {
-  description = "Branch to watch in GitOps repository"
+  description = "Branch in the GitOps repository for ArgoCD to track"
   type        = string
   default     = "main"
 }
 
 variable "app_namespace" {
-  description = "Namespace where application will be deployed"
+  description = "Kubernetes namespace where the application will be deployed"
   type        = string
   default     = "test-app"
 }
@@ -38,15 +79,3 @@ variable "gitops_path" {
   type        = string
   default     = "k8s-app/overlays/production"
 }
-
-# VPC and subnet IDs are discovered via data sources inside this module
-# (data.aws_vpc.cluster, data.aws_subnets.public, data.aws_subnets.private)
-# so module.argocd has no dependency on module.vpc — Stage 2 can run on the
-# admin EC2 with -target=module.argocd[0] without needing Stage 1 state.
-
-# ── Route53 approach (commented out) ──
-# variable "domain_name" {
-#   description = "Base domain — ArgoCD nginx Ingress uses argocd.internal.<domain>"
-#   type        = string
-#   default     = "kubeadm-demo.com"
-# }

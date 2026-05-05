@@ -39,6 +39,9 @@ module "compute" {
   aws_region                  = var.aws_region
   nat_gateway_id              = module.vpc.nat_gateway_id
   cluster_name                = var.cluster_name
+  k8s_version                 = var.compute.k8s_version
+  pod_subnet_cidr             = var.compute.pod_subnet_cidr
+  ccm_version                 = var.compute.ccm_version
 }
 
 # Admin Module - Creates private kubectl management instance (depends on control plane)
@@ -57,7 +60,9 @@ module "admin" {
   enable_auto_deploy       = var.enable_auto_deploy
   nat_gateway_id           = module.vpc.nat_gateway_id
   worker_count             = var.compute.worker_count
-  github_repo              = var.github_repo
+  github_repo              = var.gitops.github_repo
+  k8s_version              = var.compute.k8s_version
+  terraform_version        = var.admin.terraform_version
 }
 
 # Loadbalancer Module — intentionally empty.
@@ -74,15 +79,15 @@ module "argocd" {
   count  = var.deploy_argocd ? 1 : 0
   source = "./modules/argocd"
 
-  gitops_repo_url = var.gitops_repo_url
-  gitops_branch   = var.gitops_branch
-  gitops_path     = var.gitops_path
-  app_namespace   = var.app_namespace
+  gitops_repo_url = var.gitops.repo_url
+  gitops_branch   = var.gitops.branch
+  gitops_path     = var.gitops.path
+  app_namespace   = var.gitops.app_namespace
   aws_region      = var.aws_region
   cluster_name    = var.cluster_name
-  # vpc_id, subnets etc. are discovered via data sources inside the module
-  # ── Route53 approach (commented out) ──
-  # domain_name   = var.domain_name
+  vpc_cidr        = var.vpc.vpc_cidr
+  # VPC/subnet IDs are discovered via data sources inside the module (tag-based),
+  # so no module.vpc dependency — Stage 2 -target works without Stage 1 state.
 }
 
 # Pre-destroy: pause ArgoCD sync before EC2s are terminated so it doesn't

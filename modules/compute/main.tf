@@ -171,9 +171,11 @@ resource "aws_iam_role" "worker_role" {
   }
 }
 
-# IAM Policy for Worker Nodes — LBC permissions (LBC pod can run on any node)
-resource "aws_iam_role_policy" "worker_lbc_policy" {
-  name = "${var.worker_name}-lbc-policy"
+# IAM Policy for Worker Nodes — EC2 describe permissions required by CCM for
+# node registration (region/zone labels). Workers do NOT run CCM or LBC so
+# they need no load balancer permissions.
+resource "aws_iam_role_policy" "worker_ccm_policy" {
+  name = "${var.worker_name}-ccm-policy"
   role = aws_iam_role.worker_role.id
 
   policy = jsonencode({
@@ -184,54 +186,11 @@ resource "aws_iam_role_policy" "worker_lbc_policy" {
         Action = [
           "ec2:DescribeInstances",
           "ec2:DescribeRegions",
-          "ec2:DescribeRouteTables",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeVpcs",
-          "ec2:DescribeInternetGateways",
           "ec2:DescribeAvailabilityZones",
-          "ec2:DescribeAccountAttributes",
-          "ec2:DescribeAddresses",
-          "ec2:CreateSecurityGroup",
-          "ec2:DeleteSecurityGroup",
-          "ec2:CreateTags",
-          "ec2:DeleteTags",
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupIngress",
-          "elasticloadbalancing:AddTags",
-          "elasticloadbalancing:RemoveTags",
-          "elasticloadbalancing:CreateLoadBalancer",
-          "elasticloadbalancing:DeleteLoadBalancer",
-          "elasticloadbalancing:DescribeLoadBalancers",
-          "elasticloadbalancing:DescribeLoadBalancerAttributes",
-          "elasticloadbalancing:ModifyLoadBalancerAttributes",
-          "elasticloadbalancing:SetIpAddressType",
-          "elasticloadbalancing:SetSecurityGroups",
-          "elasticloadbalancing:SetSubnets",
-          "elasticloadbalancing:CreateListener",
-          "elasticloadbalancing:DeleteListener",
-          "elasticloadbalancing:DescribeListeners",
-          "elasticloadbalancing:ModifyListener",
-          "elasticloadbalancing:CreateRule",
-          "elasticloadbalancing:DeleteRule",
-          "elasticloadbalancing:DescribeRules",
-          "elasticloadbalancing:ModifyRule",
-          "elasticloadbalancing:CreateTargetGroup",
-          "elasticloadbalancing:DeleteTargetGroup",
-          "elasticloadbalancing:DescribeTargetGroups",
-          "elasticloadbalancing:DescribeTargetGroupAttributes",
-          "elasticloadbalancing:DescribeTargetHealth",
-          "elasticloadbalancing:ModifyTargetGroup",
-          "elasticloadbalancing:RegisterTargets",
-          "elasticloadbalancing:DeregisterTargets",
-          "elasticloadbalancing:DescribeTags",
-          "iam:CreateServiceLinkedRole",
-          "tag:GetResources",
-          "tag:TagResources",
-          "tag:UntagResources",
-          "acm:ListCertificates",
-          "acm:DescribeCertificate",
-          "kms:DescribeKey"
+          "ec2:DescribeVpcs",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeSecurityGroups"
         ]
         Resource = ["*"]
       }
@@ -292,6 +251,10 @@ resource "aws_instance" "control_plane" {
     control_plane_ip   = var.control_plane_private_ip
     control_plane_name = var.control_plane_name
     aws_region         = var.aws_region
+    k8s_version        = var.k8s_version
+    pod_subnet_cidr    = var.pod_subnet_cidr
+    ccm_version        = var.ccm_version
+    cluster_name       = var.cluster_name
   }) : null
 
   tags = {
@@ -324,6 +287,7 @@ resource "aws_instance" "worker" {
     control_plane_ip   = var.control_plane_private_ip
     control_plane_name = var.control_plane_name
     aws_region         = var.aws_region
+    k8s_version        = var.k8s_version
   }) : null
 
   tags = {
