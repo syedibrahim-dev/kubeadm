@@ -65,10 +65,8 @@ module "admin" {
   terraform_version        = var.admin.terraform_version
 }
 
-# Loadbalancer Module — intentionally empty.
-# Internal NLB is now CCM-provisioned (nginx service type=LoadBalancer in Stage 2).
+# Internal NLB is CCM-provisioned (nginx service type=LoadBalancer in Stage 2).
 # External ALB is created by module "argocd" after CCM provisions the NLB.
-# module "loadbalancer" { ... }  # commented out — all resources moved to modules/argocd
 
 # ArgoCD Module - Stage 2: runs automatically on the admin EC2 instance (inside VPC)
 # stage2.deploy_argocd defaults to false so this is skipped during local Stage 1 apply.
@@ -92,7 +90,7 @@ module "argocd" {
 
 # Pre-destroy: pause ArgoCD sync before EC2s are terminated so it doesn't
 # fight the destroy by reconciling resources during teardown.
-# ALB and NLB are now in Terraform state (modules/loadbalancer) so they are
+# ALB and NLB are now in Terraform state (module.argocd) so they are
 # deleted automatically by terraform destroy — no manual cleanup needed.
 resource "null_resource" "pre_destroy_cleanup" {
   triggers = {

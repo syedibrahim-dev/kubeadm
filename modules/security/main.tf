@@ -1,8 +1,16 @@
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+    }
+  }
+}
+
 # Security Groups Module
 
 # Admin Instance Security Group
 resource "aws_security_group" "admin_sg" {
-  name        = "k8s-admin-sg"
+  name        = var.admin_security_group_name
   description = "Security group for Admin kubectl management instance - SSM access only"
   vpc_id      = var.vpc_id
 
@@ -13,18 +21,18 @@ resource "aws_security_group" "admin_sg" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.egress_cidr_blocks
     description = "Allow all outbound for SSM, kubectl, and package downloads"
   }
 
   tags = {
-    Name = "k8s-admin-sg"
+    Name = var.admin_security_group_name
   }
 }
 
 # Kubernetes Nodes Security Group
 resource "aws_security_group" "k8s_nodes_sg" {
-  name        = "k8s-nodes-sg"
+  name        = var.nodes_security_group_name
   description = "Security group for K8s control plane and worker nodes - SSM access only, no SSH"
   vpc_id      = var.vpc_id
 
@@ -51,8 +59,8 @@ resource "aws_security_group" "k8s_nodes_sg" {
   # (no longer fixed at 30080). The NLB source IPs are always within the VPC
   # so restricting to vpc_cidr keeps this VPC-internal only.
   ingress {
-    from_port   = 30000
-    to_port     = 32767
+    from_port   = var.nodeport_range.from_port
+    to_port     = var.nodeport_range.to_port
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
     description = "Allow K8s NodePort range from VPC CIDR (CCM-provisioned NLB to nginx)"
@@ -63,12 +71,12 @@ resource "aws_security_group" "k8s_nodes_sg" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.egress_cidr_blocks
     description = "Allow all outbound for SSM and package downloads"
   }
 
   tags = {
-    Name                                    = "k8s-nodes-sg"
+    Name                                        = var.nodes_security_group_name
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }

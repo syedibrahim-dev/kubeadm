@@ -52,6 +52,12 @@ variable "volume_size" {
   default     = 20
 }
 
+variable "root_volume_type" {
+  description = "Root EBS volume type"
+  type        = string
+  default     = "gp3"
+}
+
 variable "enable_auto_setup" {
   description = "Run Kubernetes setup scripts via cloud-init on first boot"
   type        = bool

@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+    }
+  }
+}
+
 # Compute Module - Kubernetes Nodes
 
 # IAM Role for Control Plane
@@ -22,11 +30,10 @@ resource "aws_iam_role" "control_plane_role" {
   }
 }
 
-# IAM Policy for Control Plane — CCM (node lifecycle) + AWS Load Balancer Controller
-# CCM: node taints, labels, route management
-# LBC: provisions ALBs/NLBs from Ingress resources (replaces manual NLB management)
+# IAM Policy for Control Plane — CCM (node lifecycle + NLB provisioning)
+# CCM: node taints, labels, and Service type=LoadBalancer (NLB) management
 resource "aws_iam_role_policy" "control_plane_ccm_policy" {
-  name = "${var.control_plane_name}-ccm-lbc-policy"
+  name = "${var.control_plane_name}-ccm-policy"
   role = aws_iam_role.control_plane_role.id
 
   policy = jsonencode({
@@ -54,19 +61,9 @@ resource "aws_iam_role_policy" "control_plane_ccm_policy" {
         Resource = ["*"]
       },
       {
-        # AWS Load Balancer Controller — ALB/NLB lifecycle from Ingress resources
+        # CCM — NLB lifecycle for Service type=LoadBalancer
         Effect = "Allow"
         Action = [
-          "ec2:CreateSecurityGroup",
-          "ec2:DeleteSecurityGroup",
-          "ec2:CreateTags",
-          "ec2:DeleteTags",
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:RevokeSecurityGroupIngress",
-          "ec2:DescribeAccountAttributes",
-          "ec2:DescribeAddresses",
-          "ec2:DescribeCoipPools",
-          "ec2:GetCoipPoolUsage",
           "elasticloadbalancing:AddTags",
           "elasticloadbalancing:RemoveTags",
           "elasticloadbalancing:CreateLoadBalancer",
@@ -74,17 +71,11 @@ resource "aws_iam_role_policy" "control_plane_ccm_policy" {
           "elasticloadbalancing:DescribeLoadBalancers",
           "elasticloadbalancing:DescribeLoadBalancerAttributes",
           "elasticloadbalancing:ModifyLoadBalancerAttributes",
-          "elasticloadbalancing:SetIpAddressType",
-          "elasticloadbalancing:SetSecurityGroups",
           "elasticloadbalancing:SetSubnets",
+          "elasticloadbalancing:SetIpAddressType",
           "elasticloadbalancing:CreateListener",
           "elasticloadbalancing:DeleteListener",
           "elasticloadbalancing:DescribeListeners",
-          "elasticloadbalancing:ModifyListener",
-          "elasticloadbalancing:CreateRule",
-          "elasticloadbalancing:DeleteRule",
-          "elasticloadbalancing:DescribeRules",
-          "elasticloadbalancing:ModifyRule",
           "elasticloadbalancing:CreateTargetGroup",
           "elasticloadbalancing:DeleteTargetGroup",
           "elasticloadbalancing:DescribeTargetGroups",
@@ -95,17 +86,8 @@ resource "aws_iam_role_policy" "control_plane_ccm_policy" {
           "elasticloadbalancing:RegisterTargets",
           "elasticloadbalancing:DeregisterTargets",
           "elasticloadbalancing:DescribeTags",
-          "elasticloadbalancing:DescribeListenerCertificates",
-          "elasticloadbalancing:AddListenerCertificates",
-          "elasticloadbalancing:RemoveListenerCertificates",
           "iam:CreateServiceLinkedRole",
-          "tag:GetResources",
-          "tag:TagResources",
-          "tag:UntagResources",
-          "acm:ListCertificates",
-          "acm:DescribeCertificate",
-          "cognito-idp:DescribeUserPoolClient",
-          "kms:DescribeKey"
+          "tag:GetResources"
         ]
         Resource = ["*"]
       }
@@ -124,9 +106,7 @@ resource "aws_iam_role_policy" "control_plane_ssm_policy" {
       {
         Effect = "Allow"
         Action = [
-          "ssm:PutParameter",
-          "ssm:GetParameter",
-          "ssm:DeleteParameter"
+          "ssm:PutParameter"
         ]
         Resource = [
           "arn:aws:ssm:*:*:parameter/k8s/${var.control_plane_name}/join-command",
@@ -172,8 +152,8 @@ resource "aws_iam_role" "worker_role" {
 }
 
 # IAM Policy for Worker Nodes — EC2 describe permissions required by CCM for
-# node registration (region/zone labels). Workers do NOT run CCM or LBC so
-# they need no load balancer permissions.
+# node registration (region/zone labels). Workers do NOT run CCM so they need
+# no load balancer permissions.
 resource "aws_iam_role_policy" "worker_ccm_policy" {
   name = "${var.worker_name}-ccm-policy"
   role = aws_iam_role.worker_role.id
@@ -243,7 +223,7 @@ resource "aws_instance" "control_plane" {
 
   root_block_device {
     volume_size = var.volume_size
-    volume_type = "gp3"
+    volume_type = var.root_volume_type
   }
 
   # Automatic Kubernetes setup
@@ -258,8 +238,8 @@ resource "aws_instance" "control_plane" {
   }) : null
 
   tags = {
-    Name                                    = var.control_plane_name
-    Role                                    = "control-plane"
+    Name                                        = var.control_plane_name
+    Role                                        = "control-plane"
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
@@ -279,7 +259,7 @@ resource "aws_instance" "worker" {
 
   root_block_device {
     volume_size = var.volume_size
-    volume_type = "gp3"
+    volume_type = var.root_volume_type
   }
 
   # Automatic Kubernetes setup
@@ -291,8 +271,8 @@ resource "aws_instance" "worker" {
   }) : null
 
   tags = {
-    Name                                    = "${var.worker_name}-${count.index + 1}"
-    Role                                    = "worker"
+    Name                                        = "${var.worker_name}-${count.index + 1}"
+    Role                                        = "worker"
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
