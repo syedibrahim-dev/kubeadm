@@ -287,8 +287,7 @@ kubeadm/
 │   ├── security/                  # Security groups for K8s nodes and admin
 │   ├── compute/                   # EC2: control plane + workers, IAM roles
 │   ├── admin/                     # Admin EC2 — kubectl gateway, runs Stage 2
-│   ├── argocd/                    # nginx ingress + ArgoCD (Helm) + external ALB (Terraform)
-│   └── loadbalancer/              # Intentionally empty (all LB resources in modules/argocd)
+│   └── argocd/                    # nginx ingress + ArgoCD (Helm) + external ALB (Terraform)
 │
 ├── scripts/
 │   ├── control-plane-setup.sh     # kubeadm init, CCM deploy, SSM upload

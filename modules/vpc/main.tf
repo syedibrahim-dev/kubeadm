@@ -10,8 +10,8 @@ resource "aws_vpc" "k8s_vpc" {
   enable_dns_support   = true
 
   tags = {
-    Name                    = "k8s-private-vpc"
-    (local.cluster_tag)     = "owned"
+    Name                = "k8s-private-vpc"
+    (local.cluster_tag) = "owned"
   }
 }
 
@@ -28,7 +28,7 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                    = "k8s-public-subnet"
+    Name                     = "k8s-public-subnet"
     "kubernetes.io/role/elb" = "1"
     (local.cluster_tag)      = "owned"
   }
@@ -40,7 +40,7 @@ resource "aws_subnet" "private" {
   availability_zone = var.availability_zone
 
   tags = {
-    Name                             = "k8s-private-subnet"
+    Name                              = "k8s-private-subnet"
     "kubernetes.io/role/internal-elb" = "1"
     (local.cluster_tag)               = "owned"
   }
@@ -71,7 +71,7 @@ resource "aws_subnet" "public_2" {
   map_public_ip_on_launch = true
 
   tags = {
-    Name                    = "k8s-public-subnet-2"
+    Name                     = "k8s-public-subnet-2"
     "kubernetes.io/role/elb" = "1"
     (local.cluster_tag)      = "owned"
   }
@@ -84,7 +84,7 @@ resource "aws_subnet" "private_2" {
   availability_zone = var.availability_zone_2
 
   tags = {
-    Name                             = "k8s-private-subnet-2"
+    Name                              = "k8s-private-subnet-2"
     "kubernetes.io/role/internal-elb" = "1"
     (local.cluster_tag)               = "owned"
   }

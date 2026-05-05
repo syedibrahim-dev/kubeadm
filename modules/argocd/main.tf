@@ -1,3 +1,23 @@
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+    }
+    helm = {
+      source = "hashicorp/helm"
+    }
+    kubernetes = {
+      source = "hashicorp/kubernetes"
+    }
+    kubectl = {
+      source = "gavinbunney/kubectl"
+    }
+    null = {
+      source = "hashicorp/null"
+    }
+  }
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # DATA SOURCES — discover Stage 1 infrastructure via tags.
 # Self-contained: no dependency on module.vpc outputs, so
@@ -40,14 +60,14 @@ data "aws_subnets" "private" {
 
 resource "null_resource" "pre_install_cleanup" {
   provisioner "local-exec" {
-    environment = { KUBECONFIG = "/home/ubuntu/.kube/config" }
+    environment = { KUBECONFIG = var.kubeconfig_path }
     command     = <<-EOT
       echo "Cleaning up stale namespaces from any previous failed attempt..."
-      kubectl delete namespace ingress-nginx --ignore-not-found 2>/dev/null || true
-      kubectl delete namespace argocd --ignore-not-found 2>/dev/null || true
+      kubectl delete namespace ${var.namespaces.nginx} --ignore-not-found 2>/dev/null || true
+      kubectl delete namespace ${var.namespaces.argocd} --ignore-not-found 2>/dev/null || true
       echo "Waiting for namespaces to fully terminate..."
-      kubectl wait --for=delete namespace/ingress-nginx --timeout=60s 2>/dev/null || true
-      kubectl wait --for=delete namespace/argocd --timeout=60s 2>/dev/null || true
+      kubectl wait --for=delete namespace/${var.namespaces.nginx} --timeout=60s 2>/dev/null || true
+      kubectl wait --for=delete namespace/${var.namespaces.argocd} --timeout=60s 2>/dev/null || true
       echo "Cleanup complete."
     EOT
   }
@@ -64,13 +84,13 @@ resource "null_resource" "pre_install_cleanup" {
 # ─────────────────────────────────────────────────────────────────────────────
 
 resource "helm_release" "nginx_ingress" {
-  name             = "ingress-nginx"
+  name             = var.resource_names.nginx_release
   repository       = "https://kubernetes.github.io/ingress-nginx"
   chart            = "ingress-nginx"
-  namespace        = "ingress-nginx"
+  namespace        = var.namespaces.nginx
   create_namespace = true
   version          = var.nginx_chart_version
-  timeout          = 600
+  timeout          = var.helm_timeout_seconds
   wait             = true
 
   values = [
@@ -102,13 +122,13 @@ resource "helm_release" "nginx_ingress" {
 # ─────────────────────────────────────────────────────────────────────────────
 
 resource "helm_release" "argocd" {
-  name             = "argocd"
+  name             = var.resource_names.argocd_release
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
-  namespace        = "argocd"
+  namespace        = var.namespaces.argocd
   create_namespace = true
   version          = var.argocd_chart_version
-  timeout          = 600
+  timeout          = var.helm_timeout_seconds
   wait             = true
 
   values = [
@@ -120,8 +140,8 @@ resource "helm_release" "argocd" {
       }
       configs = {
         params = {
-          "server.insecure"  = true       # nginx terminates TLS; no cert on ArgoCD pod
-          "server.rootpath"  = "/argocd"  # sets <base href="/argocd/"> in UI HTML
+          "server.insecure" = true                 # nginx terminates TLS; no cert on ArgoCD pod
+          "server.rootpath" = var.argocd_root_path # sets <base href="/argocd/"> in UI HTML
         }
       }
     })
@@ -133,7 +153,7 @@ resource "helm_release" "argocd" {
 data "kubernetes_secret" "argocd_admin_password" {
   metadata {
     name      = "argocd-initial-admin-secret"
-    namespace = "argocd"
+    namespace = var.namespaces.argocd
   }
   depends_on = [helm_release.argocd]
 }
@@ -150,8 +170,8 @@ resource "kubectl_manifest" "argocd_application" {
     apiVersion: argoproj.io/v1alpha1
     kind: Application
     metadata:
-      name: k8s-app
-      namespace: argocd
+      name: ${var.resource_names.argocd_application}
+      namespace: ${var.namespaces.argocd}
     spec:
       project: default
       source:
@@ -186,8 +206,8 @@ resource "kubectl_manifest" "argocd_ingress" {
     apiVersion: networking.k8s.io/v1
     kind: Ingress
     metadata:
-      name: argocd-server-ingress
-      namespace: argocd
+      name: ${var.resource_names.argocd_ingress}
+      namespace: ${var.namespaces.argocd}
       annotations:
         nginx.ingress.kubernetes.io/whitelist-source-range: "${var.vpc_cidr}"
     spec:
@@ -195,7 +215,7 @@ resource "kubectl_manifest" "argocd_ingress" {
       rules:
         - http:
             paths:
-              - path: /argocd
+              - path: ${var.argocd_root_path}
                 pathType: Prefix
                 backend:
                   service:
@@ -215,64 +235,64 @@ resource "kubectl_manifest" "argocd_ingress" {
 # ─────────────────────────────────────────────────────────────────────────────
 
 resource "aws_security_group" "alb_sg" {
-  name        = "k8s-external-alb-sg"
+  name        = var.resource_names.alb_security_group
   description = "Security group for internet-facing ALB"
   vpc_id      = data.aws_vpc.cluster.id
 
   ingress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = var.alb_settings.listener_port
+    to_port     = var.alb_settings.listener_port
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-    description = "Allow HTTP from internet"
+    cidr_blocks = var.alb_settings.ingress_cidrs
+    description = "Allow ALB listener traffic from internet"
   }
 
   egress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = var.alb_settings.target_port
+    to_port     = var.alb_settings.target_port
     protocol    = "tcp"
     cidr_blocks = [data.aws_vpc.cluster.cidr_block]
     description = "Forward to internal NLB within VPC"
   }
 
-  tags = { Name = "k8s-external-alb-sg" }
+  tags = { Name = var.resource_names.alb_security_group }
 }
 
 resource "aws_lb" "external_alb" {
-  name               = "k8s-external-alb"
+  name               = var.resource_names.external_alb
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = sort(data.aws_subnets.public.ids)
 
-  tags = { Name = "k8s-external-alb" }
+  tags = { Name = var.resource_names.external_alb }
 
   depends_on = [helm_release.nginx_ingress]
 }
 
 resource "aws_lb_target_group" "alb_nlb" {
-  name        = "k8s-alb-nlb-tg"
-  port        = 80
+  name        = var.resource_names.alb_target_group
+  port        = var.alb_settings.target_port
   protocol    = "HTTP"
   vpc_id      = data.aws_vpc.cluster.id
   target_type = "ip"
 
   health_check {
     protocol            = "HTTP"
-    path                = "/"
-    port                = "80"
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    interval            = 15
-    matcher             = "200-404"
+    path                = var.alb_settings.health_check_path
+    port                = tostring(var.alb_settings.target_port)
+    healthy_threshold   = var.alb_settings.healthy_threshold
+    unhealthy_threshold = var.alb_settings.unhealthy_threshold
+    interval            = var.alb_settings.health_check_interval
+    matcher             = var.alb_settings.health_check_matcher
   }
 
-  tags = { Name = "k8s-alb-nlb-tg" }
+  tags = { Name = var.resource_names.alb_target_group }
 }
 
 resource "aws_lb_listener" "alb_http" {
   load_balancer_arn = aws_lb.external_alb.arn
-  port              = 80
+  port              = var.alb_settings.listener_port
   protocol          = "HTTP"
 
   default_action {
@@ -285,7 +305,7 @@ resource "aws_lb_listener" "alb_http" {
 # nginx whitelist-source-range is the second layer.
 resource "aws_lb_listener_rule" "block_argocd_path" {
   listener_arn = aws_lb_listener.alb_http.arn
-  priority     = 1
+  priority     = var.alb_settings.listener_rule_priority
 
   action {
     type = "fixed-response"
@@ -298,7 +318,7 @@ resource "aws_lb_listener_rule" "block_argocd_path" {
 
   condition {
     path_pattern {
-      values = ["/argocd", "/argocd/*"]
+      values = [var.argocd_root_path, "${var.argocd_root_path}/*"]
     }
   }
 }
@@ -312,7 +332,7 @@ resource "aws_lb_target_group_attachment" "nlb_ips" {
 
   target_group_arn = aws_lb_target_group.alb_nlb.arn
   target_id        = each.value
-  port             = 80
+  port             = var.alb_settings.target_port
 
   depends_on = [aws_lb_target_group.alb_nlb, helm_release.nginx_ingress]
 }
