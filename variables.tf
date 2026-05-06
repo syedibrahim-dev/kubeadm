@@ -115,17 +115,24 @@ variable "automation" {
 variable "stage2" {
   description = "Stage 2 gate for ArgoCD deployment"
   type = object({
-    deploy_argocd = bool
-    nlb = object({
+    deploy_argocd = optional(bool, false)
+    nlb = optional(object({
       ip_az1 = string
       ip_az2 = string
+      }), {
+      ip_az1 = "10.0.10.50"
+      ip_az2 = "10.0.11.50"
     })
-    helm = object({
+    helm = optional(object({
       nginx_chart_version  = string
       argocd_chart_version = string
       timeout_seconds      = number
+      }), {
+      nginx_chart_version  = "4.10.1"
+      argocd_chart_version = "7.7.11"
+      timeout_seconds      = 900
     })
-    alb_settings = object({
+    alb_settings = optional(object({
       listener_port          = number
       target_port            = number
       ingress_cidrs          = list(string)
@@ -135,20 +142,7 @@ variable "stage2" {
       unhealthy_threshold    = number
       health_check_matcher   = string
       listener_rule_priority = number
-    })
-  })
-  default = {
-    deploy_argocd = false
-    nlb = {
-      ip_az1 = "10.0.10.50"
-      ip_az2 = "10.0.11.50"
-    }
-    helm = {
-      nginx_chart_version  = "4.10.1"
-      argocd_chart_version = "7.7.11"
-      timeout_seconds      = 900
-    }
-    alb_settings = {
+      }), {
       listener_port          = 80
       target_port            = 80
       ingress_cidrs          = ["0.0.0.0/0"]
@@ -158,6 +152,7 @@ variable "stage2" {
       unhealthy_threshold    = 2
       health_check_matcher   = "200-404"
       listener_rule_priority = 1
-    }
-  }
+    })
+  })
+  default = {}
 }
