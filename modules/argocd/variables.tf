@@ -78,19 +78,6 @@ variable "helm" {
   })
 }
 
-# ── NLB pinned IPs ─────────────────────────────────────────────────────────────
-# CCM uses these IPs when provisioning the internal NLB, so they are known at
-# plan time and can be registered as ALB targets via pure Terraform (no CLI).
-# Choose unused IPs from each private subnet CIDR.
-
-variable "nlb" {
-  description = "Pinned private IPs for the CCM-provisioned internal NLB, one per AZ"
-  type = object({
-    ip_az1 = string
-    ip_az2 = string
-  })
-}
-
 # ── GitOps / Application ───────────────────────────────────────────────────────
 
 variable "gitops" {

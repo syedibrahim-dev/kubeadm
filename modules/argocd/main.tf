@@ -22,9 +22,8 @@ terraform {
 # ─────────────────────────────────────────────────────────────────────────────
 # NGINX INGRESS CONTROLLER
 # type=LoadBalancer: CCM watches this service and provisions an internal NLB
-# in the private subnets using the pinned IPs from var.nlb_ip_az1/az2.
-# Because the IPs are known at plan time, ALB target registration is pure
-# Terraform — no polling null_resource or CLI discovery needed.
+# in the private subnets. The actual NLB IPs are discovered post-provisioning
+# via the data.external.nginx_nlb data source and registered as ALB targets.
 # ─────────────────────────────────────────────────────────────────────────────
 
 resource "helm_release" "nginx_ingress" {
@@ -96,8 +95,7 @@ resource "helm_release" "argocd" {
 # ─────────────────────────────────────────────────────────────────────────────
 # EXTERNAL ALB
 # Internet-facing entry point. Forwards to the CCM-provisioned internal NLB
-# via IP targets. NLB IPs are pinned (var.nlb_ip_az1/az2) so registration is
-# pure Terraform — no CLI discovery, no polling null_resource.
+# via IP targets discovered dynamically by data.external.nginx_nlb.
 # ─────────────────────────────────────────────────────────────────────────────
 
 resource "aws_security_group" "alb_sg" {
@@ -207,16 +205,22 @@ data "external" "nginx_nlb" {
   depends_on = [helm_release.nginx_ingress]
 }
 
-locals {
-  nginx_nlb_ips = compact(split(",", try(data.external.nginx_nlb.result.ips, "")))
-}
-
-resource "aws_lb_target_group_attachment" "nlb_ips" {
-  for_each = toset(local.nginx_nlb_ips)
-
+# Two fixed attachment resources — one per AZ.
+# target_id is computed at apply time (fine for resource arguments), but we
+# cannot use for_each here because its keys must be known at plan time and the
+# NLB IPs are only available after helm_release.nginx_ingress applies.
+resource "aws_lb_target_group_attachment" "nlb_ip_az1" {
   target_group_arn = aws_lb_target_group.alb_nlb.arn
-  target_id        = each.value
+  target_id        = split(",", data.external.nginx_nlb.result.ips)[0]
   port             = var.alb_settings.target_port
 
-  depends_on = [aws_lb_target_group.alb_nlb, helm_release.nginx_ingress, data.external.nginx_nlb]
+  depends_on = [aws_lb_target_group.alb_nlb]
+}
+
+resource "aws_lb_target_group_attachment" "nlb_ip_az2" {
+  target_group_arn = aws_lb_target_group.alb_nlb.arn
+  target_id        = split(",", data.external.nginx_nlb.result.ips)[1]
+  port             = var.alb_settings.target_port
+
+  depends_on = [aws_lb_target_group.alb_nlb]
 }

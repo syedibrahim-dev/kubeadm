@@ -45,10 +45,6 @@ deploy_argocd = false
 
 # Stage 2 Configuration
 stage2 = {
-  nlb = {
-    ip_az1 = "10.0.10.50"
-    ip_az2 = "10.0.11.50"
-  }
   helm = {
     nginx_chart_version  = "4.10.1"
     argocd_chart_version = "7.7.11"

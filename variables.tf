@@ -119,15 +119,8 @@ variable "deploy_argocd" {
 }
 
 variable "stage2" {
-  description = "Stage 2 ArgoCD configuration — NLB IPs, Helm chart versions, and ALB settings"
+  description = "Stage 2 ArgoCD configuration — Helm chart versions and ALB settings"
   type = object({
-    nlb = optional(object({
-      ip_az1 = string
-      ip_az2 = string
-      }), {
-      ip_az1 = "10.0.10.50"
-      ip_az2 = "10.0.11.50"
-    })
     helm = optional(object({
       nginx_chart_version  = string
       argocd_chart_version = string

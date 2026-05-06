@@ -80,7 +80,6 @@ module "argocd" {
   aws_region   = var.core.aws_region
   cluster_name = var.core.cluster_name
   vpc_cidr     = var.vpc.vpc_cidr
-  nlb          = var.stage2.nlb
   helm         = var.stage2.helm
   alb_settings = var.stage2.alb_settings
   gitops       = { repo_url = var.gitops.repo_url, branch = var.gitops.branch, path = var.gitops.path, app_namespace = var.gitops.app_namespace }
