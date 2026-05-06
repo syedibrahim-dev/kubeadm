@@ -205,21 +205,18 @@ data "external" "nginx_nlb" {
   depends_on = [helm_release.nginx_ingress]
 }
 
-# Two fixed attachment resources — one per AZ.
-# target_id is computed at apply time (fine for resource arguments), but we
-# cannot use for_each here because its keys must be known at plan time and the
-# NLB IPs are only available after helm_release.nginx_ingress applies.
+# Register NLB IPs as ALB targets.
+# target_id is computed at apply time — that is fine for resource arguments.
+# for_each / count cannot be used here because their values must be known at
+# plan time, but the NLB IPs only become available after helm_release.nginx_ingress
+# applies and the script resolves the NLB DNS.
+#
+# CCM provisions the NLB only in the AZs that have Ready nodes. With all nodes
+# in a single AZ the NLB resolves to one IP. A second resource can be added
+# here if the cluster is later scaled to a second AZ.
 resource "aws_lb_target_group_attachment" "nlb_ip_az1" {
   target_group_arn = aws_lb_target_group.alb_nlb.arn
   target_id        = split(",", data.external.nginx_nlb.result.ips)[0]
-  port             = var.alb_settings.target_port
-
-  depends_on = [aws_lb_target_group.alb_nlb]
-}
-
-resource "aws_lb_target_group_attachment" "nlb_ip_az2" {
-  target_group_arn = aws_lb_target_group.alb_nlb.arn
-  target_id        = split(",", data.external.nginx_nlb.result.ips)[1]
   port             = var.alb_settings.target_port
 
   depends_on = [aws_lb_target_group.alb_nlb]
