@@ -44,4 +44,24 @@ automation = {
 # Stage 2 Configuration
 stage2 = {
   deploy_argocd = false
+  nlb = {
+    ip_az1 = "10.0.10.50"
+    ip_az2 = "10.0.11.50"
+  }
+  helm = {
+    nginx_chart_version  = "4.10.1"
+    argocd_chart_version = "7.7.11"
+    timeout_seconds      = 900
+  }
+  alb_settings = {
+    listener_port          = 80
+    target_port            = 80
+    ingress_cidrs          = ["0.0.0.0/0"]
+    health_check_path      = "/"
+    health_check_interval  = 15
+    healthy_threshold      = 2
+    unhealthy_threshold    = 2
+    health_check_matcher   = "200-404"
+    listener_rule_priority = 1
+  }
 }

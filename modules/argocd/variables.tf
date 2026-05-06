@@ -76,11 +76,6 @@ variable "helm" {
     argocd_chart_version = string
     timeout_seconds      = number
   })
-  default = {
-    nginx_chart_version  = "4.10.1"
-    argocd_chart_version = "7.7.11"
-    timeout_seconds      = 900
-  }
 }
 
 # ── NLB pinned IPs ─────────────────────────────────────────────────────────────
@@ -94,10 +89,6 @@ variable "nlb" {
     ip_az1 = string
     ip_az2 = string
   })
-  default = {
-    ip_az1 = "10.0.10.50"
-    ip_az2 = "10.0.11.50"
-  }
 }
 
 # ── GitOps / Application ───────────────────────────────────────────────────────
@@ -133,15 +124,4 @@ variable "alb_settings" {
     health_check_matcher   = string
     listener_rule_priority = number
   })
-  default = {
-    listener_port          = 80
-    target_port            = 80
-    ingress_cidrs          = ["0.0.0.0/0"]
-    health_check_path      = "/"
-    health_check_interval  = 15
-    healthy_threshold      = 2
-    unhealthy_threshold    = 2
-    health_check_matcher   = "200-404"
-    listener_rule_priority = 1
-  }
 }

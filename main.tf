@@ -77,10 +77,13 @@ module "argocd" {
   count  = var.stage2.deploy_argocd ? 1 : 0
   source = "./modules/argocd"
 
-  gitops       = { repo_url = var.gitops.repo_url, branch = var.gitops.branch, path = var.gitops.path, app_namespace = var.gitops.app_namespace }
   aws_region   = var.core.aws_region
-  cluster_name    = var.core.cluster_name
-  vpc_cidr        = var.vpc.vpc_cidr
+  cluster_name = var.core.cluster_name
+  vpc_cidr     = var.vpc.vpc_cidr
+  nlb          = var.stage2.nlb
+  helm         = var.stage2.helm
+  alb_settings = var.stage2.alb_settings
+  gitops       = var.gitops
   # VPC/subnet IDs are discovered via data sources inside the module (tag-based),
   # so no module.vpc dependency — Stage 2 -target works without Stage 1 state.
 }
