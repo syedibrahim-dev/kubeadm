@@ -40,7 +40,7 @@ resource "aws_iam_role_policy" "control_plane_ccm_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        # CCM — node lifecycle management
+        # CCM — node lifecycle management and route table updates
         Effect = "Allow"
         Action = [
           "autoscaling:DescribeAutoScalingGroups",
@@ -57,6 +57,21 @@ resource "aws_iam_role_policy" "control_plane_ccm_policy" {
           "ec2:DescribeInternetGateways",
           "ec2:CreateRoute",
           "ec2:DeleteRoute"
+        ]
+        Resource = ["*"]
+      },
+      {
+        # CCM — security group management for NLB (created per Service type=LoadBalancer)
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateSecurityGroup",
+          "ec2:DeleteSecurityGroup",
+          "ec2:AuthorizeSecurityGroupIngress",
+          "ec2:RevokeSecurityGroupIngress",
+          "ec2:AuthorizeSecurityGroupEgress",
+          "ec2:RevokeSecurityGroupEgress",
+          "ec2:CreateTags",
+          "ec2:DeleteTags"
         ]
         Resource = ["*"]
       },
