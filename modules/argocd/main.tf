@@ -12,6 +12,9 @@ terraform {
     kubectl = {
       source = "gavinbunney/kubectl"
     }
+    external = {
+      source = "hashicorp/external"
+    }
   }
 }
 
@@ -39,10 +42,9 @@ resource "helm_release" "nginx_ingress" {
         service = {
           type = "LoadBalancer"
           annotations = {
-            "service.beta.kubernetes.io/aws-load-balancer-type"                   = "nlb"
-            "service.beta.kubernetes.io/aws-load-balancer-internal"               = "true"
-            "service.beta.kubernetes.io/aws-load-balancer-subnets"                = join(",", sort(data.aws_subnets.private.ids))
-            "service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses" = "${var.nlb.ip_az1},${var.nlb.ip_az2}"
+            "service.beta.kubernetes.io/aws-load-balancer-type"     = "nlb"
+            "service.beta.kubernetes.io/aws-load-balancer-internal" = "true"
+            "service.beta.kubernetes.io/aws-load-balancer-subnets"  = join(",", sort(data.aws_subnets.private.ids))
           }
         }
       }
@@ -186,14 +188,34 @@ resource "aws_lb_listener_rule" "block_argocd_path" {
   }
 }
 
-# Register the NLB's pinned private IPs as ALB targets.
-# IPs are known at plan time so this is pure Terraform — no CLI needed.
+# Discover the actual NLB private IPs provisioned by CCM for the nginx Service
+# and register them as ALB targets.
+#
+# This avoids relying on the unstable/unsupported "aws-load-balancer-private-ipv4-addresses"
+# annotation behavior.
+data "external" "nginx_nlb" {
+  program = ["bash", "${path.module}/get-nginx-nlb-ips.sh"]
+
+  query = {
+    aws_region      = var.aws_region
+    kubeconfig_path = "${path.root}/.terraform/kubeconfig"
+    namespace       = var.namespaces.nginx
+    service_name    = "${var.resource_names.nginx_release}-controller"
+  }
+
+  depends_on = [helm_release.nginx_ingress]
+}
+
+locals {
+  nginx_nlb_ips = compact(split(",", try(data.external.nginx_nlb.result.ips, "")))
+}
+
 resource "aws_lb_target_group_attachment" "nlb_ips" {
-  for_each = toset([var.nlb.ip_az1, var.nlb.ip_az2])
+  for_each = toset(local.nginx_nlb_ips)
 
   target_group_arn = aws_lb_target_group.alb_nlb.arn
   target_id        = each.value
   port             = var.alb_settings.target_port
 
-  depends_on = [aws_lb_target_group.alb_nlb, helm_release.nginx_ingress]
+  depends_on = [aws_lb_target_group.alb_nlb, helm_release.nginx_ingress, data.external.nginx_nlb]
 }
