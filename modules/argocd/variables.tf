@@ -23,12 +23,6 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "kubeconfig_path" {
-  description = "Kubeconfig path used by kubectl/helm during Stage 2"
-  type        = string
-  default     = "/home/ubuntu/.kube/config"
-}
-
 variable "namespaces" {
   description = "Namespaces for nginx ingress and ArgoCD"
   type = object({

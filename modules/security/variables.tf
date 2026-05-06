@@ -27,6 +27,12 @@ variable "nodes_security_group_name" {
   default     = "k8s-nodes-sg"
 }
 
+variable "k8s_api_port" {
+  description = "Kubernetes API server port — allowed from the admin instance"
+  type        = number
+  default     = 6443
+}
+
 variable "nodeport_range" {
   description = "NodePort range allowed from within the VPC"
   type = object({

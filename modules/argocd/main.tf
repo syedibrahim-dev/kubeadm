@@ -12,67 +12,7 @@ terraform {
     kubectl = {
       source = "gavinbunney/kubectl"
     }
-    null = {
-      source = "hashicorp/null"
-    }
   }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DATA SOURCES — discover Stage 1 infrastructure via tags.
-# Self-contained: no dependency on module.vpc outputs, so
-# -target=module.argocd[0] on the admin EC2 works without Stage 1 state.
-# ─────────────────────────────────────────────────────────────────────────────
-
-data "aws_vpc" "cluster" {
-  tags = {
-    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
-  }
-}
-
-data "aws_subnets" "public" {
-  filter {
-    name   = "tag:kubernetes.io/role/elb"
-    values = ["1"]
-  }
-  filter {
-    name   = "tag:kubernetes.io/cluster/${var.cluster_name}"
-    values = ["owned"]
-  }
-}
-
-data "aws_subnets" "private" {
-  filter {
-    name   = "tag:kubernetes.io/role/internal-elb"
-    values = ["1"]
-  }
-  filter {
-    name   = "tag:kubernetes.io/cluster/${var.cluster_name}"
-    values = ["owned"]
-  }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PRE-INSTALL CLEANUP
-# Deletes stale namespaces from any previous failed attempt so Helm installs
-# always start from a clean slate.
-# ─────────────────────────────────────────────────────────────────────────────
-
-resource "null_resource" "pre_install_cleanup" {
-  provisioner "local-exec" {
-    environment = { KUBECONFIG = var.kubeconfig_path }
-    command     = <<-EOT
-      echo "Cleaning up stale namespaces from any previous failed attempt..."
-      kubectl delete namespace ${var.namespaces.nginx} --ignore-not-found 2>/dev/null || true
-      kubectl delete namespace ${var.namespaces.argocd} --ignore-not-found 2>/dev/null || true
-      echo "Waiting for namespaces to fully terminate..."
-      kubectl wait --for=delete namespace/${var.namespaces.nginx} --timeout=60s 2>/dev/null || true
-      kubectl wait --for=delete namespace/${var.namespaces.argocd} --timeout=60s 2>/dev/null || true
-      echo "Cleanup complete."
-    EOT
-  }
-
-  depends_on = [var.cluster_ready]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +49,7 @@ resource "helm_release" "nginx_ingress" {
     })
   ]
 
-  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
+  depends_on = [var.cluster_ready]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,84 +87,7 @@ resource "helm_release" "argocd" {
     })
   ]
 
-  depends_on = [var.cluster_ready, null_resource.pre_install_cleanup]
-}
-
-data "kubernetes_secret" "argocd_admin_password" {
-  metadata {
-    name      = "argocd-initial-admin-secret"
-    namespace = var.namespaces.argocd
-  }
-  depends_on = [helm_release.argocd]
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ARGOCD APPLICATION CR
-# Tells ArgoCD which GitOps repo/path/branch to sync from.
-# kubectl_manifest replaces null_resource + local-exec: helm_release.argocd
-# with wait=true already ensures the CRD and server are ready before this runs.
-# ─────────────────────────────────────────────────────────────────────────────
-
-resource "kubectl_manifest" "argocd_application" {
-  yaml_body = <<-YAML
-    apiVersion: argoproj.io/v1alpha1
-    kind: Application
-    metadata:
-      name: ${var.resource_names.argocd_application}
-      namespace: ${var.namespaces.argocd}
-    spec:
-      project: default
-      source:
-        repoURL: ${var.gitops_repo_url}
-        targetRevision: ${var.gitops_branch}
-        path: ${var.gitops_path}
-      destination:
-        server: https://kubernetes.default.svc
-        namespace: ${var.app_namespace}
-      syncPolicy:
-        automated:
-          prune: true
-          selfHeal: true
-        syncOptions:
-          - CreateNamespace=true
-  YAML
-
-  depends_on = [helm_release.argocd]
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ARGOCD NGINX INGRESS
-# Routes /argocd → argocd-server (ClusterIP).
-# No rewrite: server.rootpath=/argocd means ArgoCD handles the /argocd prefix
-# itself. Rewriting to / causes 404 because ArgoCD only serves at /argocd.
-# whitelist-source-range restricts to VPC CIDR — ArgoCD is internal-only.
-# The external ALB also blocks /argocd* at the listener rule level (layer 1).
-# ─────────────────────────────────────────────────────────────────────────────
-
-resource "kubectl_manifest" "argocd_ingress" {
-  yaml_body = <<-YAML
-    apiVersion: networking.k8s.io/v1
-    kind: Ingress
-    metadata:
-      name: ${var.resource_names.argocd_ingress}
-      namespace: ${var.namespaces.argocd}
-      annotations:
-        nginx.ingress.kubernetes.io/whitelist-source-range: "${var.vpc_cidr}"
-    spec:
-      ingressClassName: nginx
-      rules:
-        - http:
-            paths:
-              - path: ${var.argocd_root_path}
-                pathType: Prefix
-                backend:
-                  service:
-                    name: argocd-server
-                    port:
-                      number: 80
-  YAML
-
-  depends_on = [helm_release.argocd, helm_release.nginx_ingress]
+  depends_on = [var.cluster_ready]
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -302,7 +165,7 @@ resource "aws_lb_listener" "alb_http" {
 }
 
 # Block /argocd* at the ALB — first isolation layer.
-# nginx whitelist-source-range is the second layer.
+# nginx whitelist-source-range is the second layer (manifests.tf).
 resource "aws_lb_listener_rule" "block_argocd_path" {
   listener_arn = aws_lb_listener.alb_http.arn
   priority     = var.alb_settings.listener_rule_priority
@@ -325,8 +188,6 @@ resource "aws_lb_listener_rule" "block_argocd_path" {
 
 # Register the NLB's pinned private IPs as ALB targets.
 # IPs are known at plan time so this is pure Terraform — no CLI needed.
-# ALB health checks will show unhealthy briefly until CCM finishes provisioning
-# the NLB with these IPs, then go healthy automatically.
 resource "aws_lb_target_group_attachment" "nlb_ips" {
   for_each = toset([var.nlb_ip_az1, var.nlb_ip_az2])
 

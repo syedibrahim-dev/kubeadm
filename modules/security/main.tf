@@ -38,8 +38,8 @@ resource "aws_security_group" "k8s_nodes_sg" {
 
   # Allow Kubernetes API access from Admin instance
   ingress {
-    from_port       = 6443
-    to_port         = 6443
+    from_port       = var.k8s_api_port
+    to_port         = var.k8s_api_port
     protocol        = "tcp"
     security_groups = [aws_security_group.admin_sg.id]
     description     = "Allow K8s API access from Admin instance"

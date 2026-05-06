@@ -87,7 +87,7 @@ module "argocd" {
   # VPC/subnet IDs are discovered via data sources inside the module (tag-based),
   # so no module.vpc dependency — Stage 2 -target works without Stage 1 state.
 }
-
+/*
 # Pre-destroy: pause ArgoCD sync before EC2s are terminated so it doesn't
 # fight the destroy by reconciling resources during teardown.
 # ALB and NLB are now in Terraform state (module.argocd) so they are
@@ -132,4 +132,4 @@ resource "null_resource" "pre_destroy_cleanup" {
   }
 
   depends_on = [module.admin, module.compute]
-}
+}*/
