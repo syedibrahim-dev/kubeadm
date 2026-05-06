@@ -15,12 +15,12 @@ resource "kubectl_manifest" "argocd_application" {
     spec:
       project: default
       source:
-        repoURL: ${var.gitops_repo_url}
-        targetRevision: ${var.gitops_branch}
-        path: ${var.gitops_path}
+        repoURL: ${var.gitops.repo_url}
+        targetRevision: ${var.gitops.branch}
+        path: ${var.gitops.path}
       destination:
         server: https://kubernetes.default.svc
-        namespace: ${var.app_namespace}
+        namespace: ${var.gitops.app_namespace}
       syncPolicy:
         automated:
           prune: true

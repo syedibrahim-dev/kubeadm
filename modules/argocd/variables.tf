@@ -23,8 +23,16 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "argocd_root_path" {
+  description = "Base path for ArgoCD UI and ingress routing"
+  type        = string
+  default     = "/argocd"
+}
+
+# ── Namespaces ─────────────────────────────────────────────────────────────────
+
 variable "namespaces" {
-  description = "Namespaces for nginx ingress and ArgoCD"
+  description = "Kubernetes namespaces for nginx ingress and ArgoCD"
   type = object({
     nginx  = string
     argocd = string
@@ -35,8 +43,10 @@ variable "namespaces" {
   }
 }
 
+# ── Resource names ─────────────────────────────────────────────────────────────
+
 variable "resource_names" {
-  description = "Resource names for ArgoCD and external ALB resources"
+  description = "Resource names for Helm releases, K8s objects, and AWS ALB resources"
   type = object({
     nginx_release      = string
     argocd_release     = string
@@ -57,17 +67,58 @@ variable "resource_names" {
   }
 }
 
-variable "argocd_root_path" {
-  description = "Base path for ArgoCD UI and ingress routing"
-  type        = string
-  default     = "/argocd"
+# ── Helm ───────────────────────────────────────────────────────────────────────
+
+variable "helm" {
+  description = "Helm chart versions and install timeout. timeout_seconds covers image pulls + NLB provisioning — keep >= 900."
+  type = object({
+    nginx_chart_version  = string
+    argocd_chart_version = string
+    timeout_seconds      = number
+  })
+  default = {
+    nginx_chart_version  = "4.10.1"
+    argocd_chart_version = "7.7.11"
+    timeout_seconds      = 900
+  }
 }
 
-variable "helm_timeout_seconds" {
-  description = "Timeout for Helm releases in seconds"
-  type        = number
-  default     = 600
+# ── NLB pinned IPs ─────────────────────────────────────────────────────────────
+# CCM uses these IPs when provisioning the internal NLB, so they are known at
+# plan time and can be registered as ALB targets via pure Terraform (no CLI).
+# Choose unused IPs from each private subnet CIDR.
+
+variable "nlb" {
+  description = "Pinned private IPs for the CCM-provisioned internal NLB, one per AZ"
+  type = object({
+    ip_az1 = string
+    ip_az2 = string
+  })
+  default = {
+    ip_az1 = "10.0.10.50"
+    ip_az2 = "10.0.11.50"
+  }
 }
+
+# ── GitOps / Application ───────────────────────────────────────────────────────
+
+variable "gitops" {
+  description = "GitOps repository and ArgoCD application configuration"
+  type = object({
+    repo_url      = string
+    branch        = string
+    path          = string
+    app_namespace = string
+  })
+  default = {
+    repo_url      = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
+    branch        = "main"
+    path          = "k8s-app/overlays/production"
+    app_namespace = "test-app"
+  }
+}
+
+# ── ALB settings ───────────────────────────────────────────────────────────────
 
 variable "alb_settings" {
   description = "External ALB listener and health check settings"
@@ -93,61 +144,4 @@ variable "alb_settings" {
     health_check_matcher   = "200-404"
     listener_rule_priority = 1
   }
-}
-
-# ── NLB pinned IPs ────────────────────────────────────────────────────────────
-# CCM uses these IPs when provisioning the internal NLB, so they are known at
-# plan time and can be registered as ALB targets via pure Terraform (no CLI).
-# Choose unused IPs from each private subnet CIDR.
-
-variable "nlb_ip_az1" {
-  description = "Pinned private IP for the NLB in AZ1 private subnet (10.0.10.0/24)"
-  type        = string
-  default     = "10.0.10.50"
-}
-
-variable "nlb_ip_az2" {
-  description = "Pinned private IP for the NLB in AZ2 private subnet (10.0.11.0/24)"
-  type        = string
-  default     = "10.0.11.50"
-}
-
-# ── Helm chart versions ───────────────────────────────────────────────────────
-
-variable "nginx_chart_version" {
-  description = "ingress-nginx Helm chart version"
-  type        = string
-  default     = "4.10.1"
-}
-
-variable "argocd_chart_version" {
-  description = "argo-cd Helm chart version"
-  type        = string
-  default     = "7.7.11"
-}
-
-# ── GitOps / Application ──────────────────────────────────────────────────────
-
-variable "gitops_repo_url" {
-  description = "GitOps repository URL for ArgoCD to watch"
-  type        = string
-  default     = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
-}
-
-variable "gitops_branch" {
-  description = "Branch in the GitOps repository for ArgoCD to track"
-  type        = string
-  default     = "main"
-}
-
-variable "app_namespace" {
-  description = "Kubernetes namespace where the application will be deployed"
-  type        = string
-  default     = "test-app"
-}
-
-variable "gitops_path" {
-  description = "Path inside the GitOps repository that ArgoCD watches"
-  type        = string
-  default     = "k8s-app/overlays/production"
 }

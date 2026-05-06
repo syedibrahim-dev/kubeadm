@@ -46,6 +46,7 @@ variable "compute" {
     k8s_version                 = string
     ccm_version                 = string
     pod_subnet_cidr             = string
+    
   })
   default = {
     control_plane_instance_type = "t3.medium"

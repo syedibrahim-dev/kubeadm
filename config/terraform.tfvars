@@ -23,12 +23,16 @@ compute = {
   control_plane_name          = "K8s-Control-Plane"
   worker_name                 = "K8s-Worker"
   volume_size                 = 20
+  k8s_version                 = "1.31"
+  ccm_version                 = "v1.31.1"
+  pod_subnet_cidr             = "192.168.0.0/16"
 }
 
 # Admin Instance Configuration
 admin = {
-  instance_type = "t3.micro"
-  admin_name    = "K8s-Admin"
+  instance_type     = "t3.micro"
+  admin_name        = "K8s-Admin"
+  terraform_version = "1.10.5"
 }
 
 # Automation Configuration

@@ -77,11 +77,8 @@ module "argocd" {
   count  = var.stage2.deploy_argocd ? 1 : 0
   source = "./modules/argocd"
 
-  gitops_repo_url = var.gitops.repo_url
-  gitops_branch   = var.gitops.branch
-  gitops_path     = var.gitops.path
-  app_namespace   = var.gitops.app_namespace
-  aws_region      = var.core.aws_region
+  gitops       = { repo_url = var.gitops.repo_url, branch = var.gitops.branch, path = var.gitops.path, app_namespace = var.gitops.app_namespace }
+  aws_region   = var.core.aws_region
   cluster_name    = var.core.cluster_name
   vpc_cidr        = var.vpc.vpc_cidr
   # VPC/subnet IDs are discovered via data sources inside the module (tag-based),

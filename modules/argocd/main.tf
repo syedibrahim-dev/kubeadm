@@ -29,8 +29,8 @@ resource "helm_release" "nginx_ingress" {
   chart            = "ingress-nginx"
   namespace        = var.namespaces.nginx
   create_namespace = true
-  version          = var.nginx_chart_version
-  timeout          = var.helm_timeout_seconds
+  version          = var.helm.nginx_chart_version
+  timeout          = var.helm.timeout_seconds
   wait             = true
 
   values = [
@@ -42,7 +42,7 @@ resource "helm_release" "nginx_ingress" {
             "service.beta.kubernetes.io/aws-load-balancer-type"                   = "nlb"
             "service.beta.kubernetes.io/aws-load-balancer-internal"               = "true"
             "service.beta.kubernetes.io/aws-load-balancer-subnets"                = join(",", sort(data.aws_subnets.private.ids))
-            "service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses" = "${var.nlb_ip_az1},${var.nlb_ip_az2}"
+            "service.beta.kubernetes.io/aws-load-balancer-private-ipv4-addresses" = "${var.nlb.ip_az1},${var.nlb.ip_az2}"
           }
         }
       }
@@ -67,8 +67,8 @@ resource "helm_release" "argocd" {
   chart            = "argo-cd"
   namespace        = var.namespaces.argocd
   create_namespace = true
-  version          = var.argocd_chart_version
-  timeout          = var.helm_timeout_seconds
+  version          = var.helm.argocd_chart_version
+  timeout          = var.helm.timeout_seconds
   wait             = true
 
   values = [
@@ -189,7 +189,7 @@ resource "aws_lb_listener_rule" "block_argocd_path" {
 # Register the NLB's pinned private IPs as ALB targets.
 # IPs are known at plan time so this is pure Terraform — no CLI needed.
 resource "aws_lb_target_group_attachment" "nlb_ips" {
-  for_each = toset([var.nlb_ip_az1, var.nlb_ip_az2])
+  for_each = toset([var.nlb.ip_az1, var.nlb.ip_az2])
 
   target_group_arn = aws_lb_target_group.alb_nlb.arn
   target_id        = each.value
