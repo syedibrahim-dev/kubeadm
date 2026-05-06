@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 - <<'PY'
+# Capture Terraform's JSON input before the heredoc consumes stdin.
+# python3 - <<'PY' uses the heredoc as its stdin (the script source),
+# so sys.stdin would read the script itself — not the Terraform query.
+# Exporting via env var is the correct workaround.
+TERRAFORM_INPUT=$(cat)
+export TERRAFORM_INPUT
+
+python3 <<'PY'
 import json, os, subprocess, sys, time
 
-query = json.load(sys.stdin)
+query = json.loads(os.environ["TERRAFORM_INPUT"])
 region = query.get("aws_region", "")
 kubeconfig = query.get("kubeconfig_path", "")
 namespace = query.get("namespace", "")
