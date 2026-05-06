@@ -74,7 +74,7 @@ module "admin" {
 # where the K8s API server (10.0.x.x:6443) is reachable.
 # Stage 2 also creates the external ALB (after CCM provisions the internal NLB).
 module "argocd" {
-  count  = var.stage2.deploy_argocd ? 1 : 0
+  count  = var.deploy_argocd ? 1 : 0
   source = "./modules/argocd"
 
   aws_region   = var.core.aws_region
@@ -83,7 +83,7 @@ module "argocd" {
   nlb          = var.stage2.nlb
   helm         = var.stage2.helm
   alb_settings = var.stage2.alb_settings
-  gitops       = var.gitops
+  gitops       = { repo_url = var.gitops.repo_url, branch = var.gitops.branch, path = var.gitops.path, app_namespace = var.gitops.app_namespace }
   # VPC/subnet IDs are discovered via data sources inside the module (tag-based),
   # so no module.vpc dependency — Stage 2 -target works without Stage 1 state.
 }

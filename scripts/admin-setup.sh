@@ -201,7 +201,7 @@ chmod 600 .terraform/kubeconfig
 
 # Initialize Terraform and deploy only the ArgoCD module
 terraform init
-terraform apply -var-file=config/terraform.tfvars -var="stage2={deploy_argocd=true}" -target='module.argocd[0]' -auto-approve
+terraform apply -var-file=config/terraform.tfvars -var='deploy_argocd=true' -target='module.argocd[0]' -auto-approve
 
 echo ""
 echo "ArgoCD deployment complete!"

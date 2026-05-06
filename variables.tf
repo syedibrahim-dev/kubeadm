@@ -112,10 +112,15 @@ variable "automation" {
   }
 }
 
+variable "deploy_argocd" {
+  description = "Stage 2 gate — set to true only when running from the admin EC2 inside the VPC. The K8s API (10.x.x.x:6443) is unreachable from outside."
+  type        = bool
+  default     = false
+}
+
 variable "stage2" {
-  description = "Stage 2 gate for ArgoCD deployment"
+  description = "Stage 2 ArgoCD configuration — NLB IPs, Helm chart versions, and ALB settings"
   type = object({
-    deploy_argocd = optional(bool, false)
     nlb = optional(object({
       ip_az1 = string
       ip_az2 = string

@@ -41,9 +41,10 @@ automation = {
   enable_auto_deploy = true
 }
 
+deploy_argocd = false
+
 # Stage 2 Configuration
 stage2 = {
-  deploy_argocd = false
   nlb = {
     ip_az1 = "10.0.10.50"
     ip_az2 = "10.0.11.50"
