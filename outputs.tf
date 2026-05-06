@@ -45,12 +45,12 @@ output "worker_count" {
 
 output "external_alb_dns" {
   description = "External ALB DNS — available after Stage 2 (stage2.deploy_argocd=true)"
-  value       = var.stage2.deploy_argocd ? module.argocd[0].external_alb_dns : "Available after Stage 2 (stage2.deploy_argocd=true)"
+  value       = var.deploy_argocd ? module.argocd[0].external_alb_dns : "Available after Stage 2 (stage2.deploy_argocd=true)"
 }
 
 output "argocd_admin_password" {
   description = "ArgoCD initial admin password"
-  value       = var.stage2.deploy_argocd ? module.argocd[0].argocd_admin_password : "Available after Stage 2 (stage2.deploy_argocd=true)"
+  value       = var.deploy_argocd ? module.argocd[0].argocd_admin_password : "Available after Stage 2 (stage2.deploy_argocd=true)"
   sensitive   = true
 }
 
