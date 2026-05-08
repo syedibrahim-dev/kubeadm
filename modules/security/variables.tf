@@ -50,3 +50,9 @@ variable "egress_cidr_blocks" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "tags" {
+  description = "Common tags applied to all resources (merged with resource-specific tags)"
+  type        = map(string)
+  default     = {}
+}

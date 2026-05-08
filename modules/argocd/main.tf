@@ -119,7 +119,7 @@ resource "aws_security_group" "alb_sg" {
     description = "Forward to internal NLB within VPC"
   }
 
-  tags = { Name = var.resource_names.alb_security_group }
+  tags = merge(var.tags, { Name = var.resource_names.alb_security_group })
 }
 
 resource "aws_lb" "external_alb" {
@@ -129,7 +129,7 @@ resource "aws_lb" "external_alb" {
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = sort(data.aws_subnets.public.ids)
 
-  tags = { Name = var.resource_names.external_alb }
+  tags = merge(var.tags, { Name = var.resource_names.external_alb })
 
   depends_on = [helm_release.nginx_ingress]
 }
@@ -151,7 +151,7 @@ resource "aws_lb_target_group" "alb_nlb" {
     matcher             = var.alb_settings.health_check_matcher
   }
 
-  tags = { Name = var.resource_names.alb_target_group }
+  tags = merge(var.tags, { Name = var.resource_names.alb_target_group })
 }
 
 resource "aws_lb_listener" "alb_http" {

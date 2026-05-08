@@ -25,9 +25,7 @@ resource "aws_iam_role" "control_plane_role" {
     ]
   })
 
-  tags = {
-    Name = "${var.control_plane_name}-role"
-  }
+  tags = merge(var.tags, { Name = "${var.control_plane_name}-role" })
 }
 
 # IAM Policy for Control Plane — CCM (node lifecycle + NLB provisioning)
@@ -161,9 +159,7 @@ resource "aws_iam_role" "worker_role" {
     ]
   })
 
-  tags = {
-    Name = "${var.worker_name}-role"
-  }
+  tags = merge(var.tags, { Name = "${var.worker_name}-role" })
 }
 
 # IAM Policy for Worker Nodes — EC2 describe permissions required by CCM for
@@ -252,11 +248,11 @@ resource "aws_instance" "control_plane" {
     cluster_name       = var.cluster_name
   }) : null
 
-  tags = {
+  tags = merge(var.tags, {
     Name                                        = var.control_plane_name
     Role                                        = "control-plane"
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
-  }
+  })
 }
 
 # Worker Node (Private)
@@ -285,9 +281,9 @@ resource "aws_instance" "worker" {
     k8s_version        = var.k8s_version
   }) : null
 
-  tags = {
+  tags = merge(var.tags, {
     Name                                        = "${var.worker_name}-${count.index + 1}"
     Role                                        = "worker"
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
-  }
+  })
 }

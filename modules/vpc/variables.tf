@@ -39,3 +39,9 @@ variable "cluster_name" {
   description = "Kubernetes cluster name — used in AWS resource tags"
   type        = string
 }
+
+variable "tags" {
+  description = "Common tags applied to all resources (merged with resource-specific tags)"
+  type        = map(string)
+  default     = {}
+}

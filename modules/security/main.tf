@@ -25,9 +25,7 @@ resource "aws_security_group" "admin_sg" {
     description = "Allow all outbound for SSM, kubectl, and package downloads"
   }
 
-  tags = {
-    Name = var.admin_security_group_name
-  }
+  tags = merge(var.tags, { Name = var.admin_security_group_name })
 }
 
 # Kubernetes Nodes Security Group
@@ -75,8 +73,8 @@ resource "aws_security_group" "k8s_nodes_sg" {
     description = "Allow all outbound for SSM and package downloads"
   }
 
-  tags = {
+  tags = merge(var.tags, {
     Name                                        = var.nodes_security_group_name
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
-  }
+  })
 }

@@ -93,3 +93,9 @@ variable "nat_gateway_id" {
   description = "NAT Gateway ID — explicit dependency ensures NAT is ready before instances boot"
   type        = string
 }
+
+variable "tags" {
+  description = "Common tags applied to all resources (merged with resource-specific tags)"
+  type        = map(string)
+  default     = {}
+}

@@ -76,3 +76,9 @@ variable "terraform_version" {
   description = "Terraform version to install for Stage 2 deployment (e.g. '1.10.5')"
   type        = string
 }
+
+variable "tags" {
+  description = "Common tags applied to all resources (merged with resource-specific tags)"
+  type        = map(string)
+  default     = {}
+}

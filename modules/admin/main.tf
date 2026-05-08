@@ -17,9 +17,7 @@ resource "aws_iam_role" "admin_role" {
     ]
   })
 
-  tags = {
-    Name = "${var.admin_name}-role"
-  }
+  tags = merge(var.tags, { Name = "${var.admin_name}-role" })
 }
 
 # IAM Policy for Admin Instance (SSM Parameter Store Read Access)
@@ -137,9 +135,10 @@ resource "aws_instance" "admin" {
     terraform_version  = var.terraform_version
   }) : null
 
-  tags = {
+  tags = merge(var.tags, {
     Name = var.admin_name
-  }
+    Role = "admin"
+  })
 
   depends_on = [var.nat_gateway_id]
 }

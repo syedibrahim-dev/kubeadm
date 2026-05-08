@@ -112,3 +112,9 @@ variable "alb_settings" {
     listener_rule_priority = number
   })
 }
+
+variable "tags" {
+  description = "Common tags applied to all resources (merged with resource-specific tags)"
+  type        = map(string)
+  default     = {}
+}

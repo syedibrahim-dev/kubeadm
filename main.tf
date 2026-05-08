@@ -10,6 +10,7 @@ module "vpc" {
   private_subnet_2_cidr = var.vpc.private_subnet_2_cidr
   availability_zone_2   = data.aws_availability_zones.available.names[1]
   cluster_name          = var.core.cluster_name
+  tags                  = local.common_tags
 }
 
 # Security Module - Creates security groups
@@ -19,6 +20,7 @@ module "security" {
   vpc_id       = module.vpc.vpc_id
   vpc_cidr     = var.vpc.vpc_cidr
   cluster_name = var.core.cluster_name
+  tags         = local.common_tags
 }
 
 # Compute Module - Creates Kubernetes nodes (MUST be created before admin)
@@ -42,6 +44,7 @@ module "compute" {
   k8s_version                 = var.compute.k8s_version
   pod_subnet_cidr             = var.compute.pod_subnet_cidr
   ccm_version                 = var.compute.ccm_version
+  tags                        = local.common_tags
 }
 
 # Admin Module - Creates private kubectl management instance (depends on control plane)
@@ -63,6 +66,7 @@ module "admin" {
   github_repo              = var.gitops.github_repo
   k8s_version              = var.compute.k8s_version
   terraform_version        = var.admin.terraform_version
+  tags                     = local.common_tags
 }
 
 # Internal NLB is CCM-provisioned (nginx service type=LoadBalancer in Stage 2).
@@ -83,6 +87,7 @@ module "argocd" {
   helm         = var.stage2.helm
   alb_settings = var.stage2.alb_settings
   gitops       = { repo_url = var.gitops.repo_url, branch = var.gitops.branch, path = var.gitops.path, app_namespace = var.gitops.app_namespace }
+  tags         = local.common_tags
   # VPC/subnet IDs are discovered via data sources inside the module (tag-based),
   # so no module.vpc dependency — Stage 2 -target works without Stage 1 state.
 }
