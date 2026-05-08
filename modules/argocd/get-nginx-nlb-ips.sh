@@ -48,7 +48,7 @@ if not lb_dns:
 # for CCM-provisioned NLBs with dynamic IP assignment — DNS resolution is the
 # reliable way to discover the actual private IPs.
 ips = []
-deadline2 = time.time() + 120  # 2 minutes for DNS propagation
+deadline2 = time.time() + 300  # 5 minutes for NLB DNS propagation
 while time.time() < deadline2:
     try:
         resolved = sorted(set([
