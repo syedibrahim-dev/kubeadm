@@ -158,11 +158,6 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 # taint is cleared promptly. The chart is installed from the control plane because
 # the K8s API is already running here after kubeadm init — Helm only talks to
 # the API server, it does not need worker nodes to be schedulable.
-#
-# The chart's default tolerations already include the uninitialized and
-# control-plane taints, so CCM can schedule on this node immediately.
-# --configure-cloud-routes=false is required when using Calico CNI — without it
-# CCM overwrites Calico's VPC route entries and breaks cross-node pod networking.
 echo "Deploying AWS Cloud Controller Manager via Helm..."
 export KUBECONFIG=/etc/kubernetes/admin.conf
 
