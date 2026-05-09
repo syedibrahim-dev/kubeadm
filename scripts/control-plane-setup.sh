@@ -147,128 +147,50 @@ cp /etc/kubernetes/admin.conf /root/.kube/config
 # Install Calico CNI
 kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://docs.projectcalico.org/manifests/calico.yaml
 
-# Deploy AWS Cloud Controller Manager
-# CCM handles node lifecycle only: removes node.cloudprovider.kubernetes.io/uninitialized
-# taint, sets node labels (zone/region), and manages routes.
-# Load balancer provisioning is handled by AWS Load Balancer Controller (deployed in Stage 2).
-# Must deploy CCM before workers join so the uninitialized taint is removed promptly.
-# Key: tolerations must include node.cloudprovider.kubernetes.io/uninitialized
-# so CCM itself can start even when nodes have that taint (chicken-and-egg fix).
-echo "Deploying AWS Cloud Controller Manager..."
-kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f - <<'EOF'
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: cloud-controller-manager
-  namespace: kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: system:cloud-controller-manager
-rules:
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["*"]
-  - apiGroups: [""]
-    resources: ["nodes/status"]
-    verbs: ["patch"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["list", "patch", "update", "watch"]
-  - apiGroups: [""]
-    resources: ["services/status"]
-    verbs: ["patch", "update"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["create", "get", "list", "watch", "update"]
-  - apiGroups: [""]
-    resources: ["persistentvolumes"]
-    verbs: ["get", "list", "update", "watch"]
-  - apiGroups: [""]
-    resources: ["endpoints"]
-    verbs: ["create", "get", "list", "watch", "update"]
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["create", "get", "list", "watch", "update"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: system:cloud-controller-manager
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: system:cloud-controller-manager
-subjects:
-  - kind: ServiceAccount
-    name: cloud-controller-manager
-    namespace: kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: system:cloud-controller-manager:extension-apiserver-authentication-reader
-  namespace: kube-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: extension-apiserver-authentication-reader
-subjects:
-  - kind: ServiceAccount
-    name: cloud-controller-manager
-    namespace: kube-system
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: aws-cloud-controller-manager
-  namespace: kube-system
-  labels:
-    k8s-app: aws-cloud-controller-manager
-spec:
-  selector:
-    matchLabels:
-      k8s-app: aws-cloud-controller-manager
-  template:
-    metadata:
-      labels:
-        k8s-app: aws-cloud-controller-manager
-    spec:
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
-      tolerations:
-        - key: node.cloudprovider.kubernetes.io/uninitialized
-          value: "true"
-          effect: NoSchedule
-        - key: node-role.kubernetes.io/control-plane
-          effect: NoSchedule
-      hostNetwork: true
-      serviceAccountName: cloud-controller-manager
-      priorityClassName: system-cluster-critical
-      containers:
-        - name: aws-cloud-controller-manager
-          image: registry.k8s.io/provider-aws/cloud-controller-manager:${ccm_version}
-          args:
-            - --v=2
-            - --cloud-provider=aws
-            - --cluster-name=${cluster_name}
-            - --configure-cloud-routes=false
-          resources:
-            requests:
-              cpu: 200m
-              memory: 128Mi
-EOF
+# ── Install Helm ─────────────────────────────────────────────────────────────
+# Helm is needed here to deploy CCM via its official chart.
+# All other Helm deployments (nginx, ArgoCD) run from the admin EC2 in Stage 2.
+echo "Installing Helm..."
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-echo "AWS CCM deployed. Waiting for it to start..."
-kubectl --kubeconfig=/etc/kubernetes/admin.conf rollout status daemonset/aws-cloud-controller-manager -n kube-system --timeout=120s || true
+# ── Deploy AWS Cloud Controller Manager via Helm ──────────────────────────────
+# CCM must run before workers join so the node.cloudprovider.kubernetes.io/uninitialized
+# taint is cleared promptly. The chart is installed from the control plane because
+# the K8s API is already running here after kubeadm init — Helm only talks to
+# the API server, it does not need worker nodes to be schedulable.
+#
+# The chart's default tolerations already include the uninitialized and
+# control-plane taints, so CCM can schedule on this node immediately.
+# --configure-cloud-routes=false is required when using Calico CNI — without it
+# CCM overwrites Calico's VPC route entries and breaks cross-node pod networking.
+echo "Deploying AWS Cloud Controller Manager via Helm..."
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+helm repo add aws-cloud-controller-manager https://kubernetes.github.io/cloud-provider-aws
+helm repo update
+
+cat > /tmp/ccm-values.yaml << 'CCMEOF'
+image:
+  tag: "${ccm_version}"
+
+clusterName: "${cluster_name}"
+
+args:
+  - --v=2
+  - --cloud-provider=aws
+  - --cluster-name=${cluster_name}
+  - --configure-cloud-routes=false
+CCMEOF
+
+helm install aws-cloud-controller-manager \
+  aws-cloud-controller-manager/aws-cloud-controller-manager \
+  --namespace kube-system \
+  -f /tmp/ccm-values.yaml
+
+rm -f /tmp/ccm-values.yaml
+
+echo "AWS CCM deployed via Helm. Waiting for it to start..."
+kubectl rollout status daemonset/aws-cloud-controller-manager -n kube-system --timeout=120s || true
 
 # Generate join command and save it
 kubeadm token create --print-join-command > /home/ubuntu/join-command.sh
