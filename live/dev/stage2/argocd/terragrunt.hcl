@@ -53,7 +53,7 @@ dependency "admin" {
     admin_instance_id = "i-00000000000000000"
     admin_private_ip  = "10.0.10.50"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply", "destroy"]
 }
 
 # Ordering guard — ensures Stage 1 is complete before Stage 2 runs locally.
@@ -65,7 +65,7 @@ dependency "compute" {
     control_plane_private_ip = "10.0.10.100"
     worker_count             = 1
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply", "destroy"]
 }
 
 # ── Stage 2 provider override ─────────────────────────────────────────────────
