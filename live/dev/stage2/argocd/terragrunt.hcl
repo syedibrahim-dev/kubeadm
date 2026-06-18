@@ -53,10 +53,11 @@ dependency "admin" {
     admin_instance_id = "i-00000000000000000"
     admin_private_ip  = "10.0.10.50"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply"]
 }
 
-# Explicit compute dependency for outputs consumed below
+# Ordering guard — ensures Stage 1 is complete before Stage 2 runs locally.
+# On the admin EC2 state isn't available so apply falls back to mock outputs.
 dependency "compute" {
   config_path = "../../stage1/compute"
 
@@ -64,7 +65,7 @@ dependency "compute" {
     control_plane_private_ip = "10.0.10.100"
     worker_count             = 1
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply"]
 }
 
 # ── Stage 2 provider override ─────────────────────────────────────────────────
