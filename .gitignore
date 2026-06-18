@@ -33,3 +33,4 @@ Thumbs.db
 
 # Note: config/terraform.tfvars is intentionally NOT ignored
 # as it contains the configuration template for this project
+echo "state/" >> /home/ibrahim/kubeadm/.gitignore 

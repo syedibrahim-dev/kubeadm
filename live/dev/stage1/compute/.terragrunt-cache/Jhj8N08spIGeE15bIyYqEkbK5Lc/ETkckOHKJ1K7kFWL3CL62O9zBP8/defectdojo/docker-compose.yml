@@ -1,0 +1,132 @@
+# ==============================================================================
+# DefectDojo — Self-Hosted Security Findings Dashboard
+#
+# Start:   docker compose -f defectdojo/docker-compose.yml up -d
+# Access:  http://localhost:8080
+# Login:   admin / admin (change after first login)
+# API Key: http://localhost:8080/api/key-v2  (copy to GitHub Secrets)
+#
+# Stop:    docker compose -f defectdojo/docker-compose.yml down
+# Reset:   docker compose -f defectdojo/docker-compose.yml down -v
+# ==============================================================================
+
+services:
+  defectdojo-nginx:
+    image: defectdojo/defectdojo-nginx:2.38.1
+    container_name: defectdojo-nginx
+    depends_on:
+      - defectdojo
+    ports:
+      - "8080:8080"
+    environment:
+      NGINX_METRICS_ENABLED: "false"
+      DD_UWSGI_HOST: "defectdojo"
+    volumes:
+      - defectdojo-media:/usr/share/nginx/html/media
+
+  defectdojo:
+    image: defectdojo/defectdojo-django:2.38.1
+    container_name: defectdojo-django
+    depends_on:
+      - defectdojo-db
+    environment:
+      DD_DATABASE_ENGINE: django.db.backends.postgresql
+      DD_DATABASE_HOST: defectdojo-db
+      DD_DATABASE_PORT: "5432"
+      DD_DATABASE_NAME: defectdojo
+      DD_DATABASE_USER: defectdojo
+      DD_DATABASE_PASSWORD: defectdojo
+      DD_SECRET_KEY: "change-me-to-a-random-secret-key"
+      DD_CREDENTIAL_AES_256_KEY: "change-me-to-32-chars-exactly!!"
+      DD_ALLOWED_HOSTS: "*"
+      DD_CSRF_TRUSTED_ORIGINS: "http://localhost:8080"
+      DD_SESSION_COOKIE_SECURE: "False"
+      DD_CSRF_COOKIE_SECURE: "False"
+      DD_ADMIN_USER: admin
+      DD_ADMIN_PASSWORD: admin
+      DD_ADMIN_MAIL: admin@defectdojo.local
+    volumes:
+      - defectdojo-media:/app/media
+
+  defectdojo-celeryworker:
+    image: defectdojo/defectdojo-django:2.38.1
+    container_name: defectdojo-celeryworker
+    depends_on:
+      - defectdojo-db
+      - defectdojo-rabbitmq
+    command: celery --app=dojo worker --loglevel=INFO --concurrency=2
+    environment:
+      DD_DATABASE_ENGINE: django.db.backends.postgresql
+      DD_DATABASE_HOST: defectdojo-db
+      DD_DATABASE_PORT: "5432"
+      DD_DATABASE_NAME: defectdojo
+      DD_DATABASE_USER: defectdojo
+      DD_DATABASE_PASSWORD: defectdojo
+      DD_SECRET_KEY: "change-me-to-a-random-secret-key"
+      DD_CREDENTIAL_AES_256_KEY: "change-me-to-32-chars-exactly!!"
+      DD_CELERY_BROKER_URL: amqp://defectdojo:defectdojo@defectdojo-rabbitmq:5672//
+
+  defectdojo-celerybeat:
+    image: defectdojo/defectdojo-django:2.38.1
+    container_name: defectdojo-celerybeat
+    depends_on:
+      - defectdojo-db
+      - defectdojo-rabbitmq
+    command: celery --app=dojo beat --loglevel=INFO
+    environment:
+      DD_DATABASE_ENGINE: django.db.backends.postgresql
+      DD_DATABASE_HOST: defectdojo-db
+      DD_DATABASE_PORT: "5432"
+      DD_DATABASE_NAME: defectdojo
+      DD_DATABASE_USER: defectdojo
+      DD_DATABASE_PASSWORD: defectdojo
+      DD_SECRET_KEY: "change-me-to-a-random-secret-key"
+      DD_CREDENTIAL_AES_256_KEY: "change-me-to-32-chars-exactly!!"
+      DD_CELERY_BROKER_URL: amqp://defectdojo:defectdojo@defectdojo-rabbitmq:5672//
+
+  defectdojo-initializer:
+    image: defectdojo/defectdojo-django:2.38.1
+    container_name: defectdojo-initializer
+    depends_on:
+      - defectdojo-db
+    entrypoint: ["/wait-for-it.sh", "defectdojo-db:5432", "-t", "30", "--"]
+    command: >
+      bash -c "
+        python manage.py migrate &&
+        python manage.py createsuperuser --noinput || true &&
+        python manage.py loaddata initial_banner_conf dojo_group_member_role regulation initial_surveys
+      "
+    environment:
+      DD_DATABASE_ENGINE: django.db.backends.postgresql
+      DD_DATABASE_HOST: defectdojo-db
+      DD_DATABASE_PORT: "5432"
+      DD_DATABASE_NAME: defectdojo
+      DD_DATABASE_USER: defectdojo
+      DD_DATABASE_PASSWORD: defectdojo
+      DD_SECRET_KEY: "change-me-to-a-random-secret-key"
+      DD_CREDENTIAL_AES_256_KEY: "change-me-to-32-chars-exactly!!"
+      DD_ADMIN_USER: admin
+      DD_ADMIN_PASSWORD: admin
+      DD_ADMIN_MAIL: admin@defectdojo.local
+      DJANGO_SUPERUSER_PASSWORD: admin
+
+  defectdojo-db:
+    image: postgres:16-alpine
+    container_name: defectdojo-db
+    environment:
+      POSTGRES_DB: defectdojo
+      POSTGRES_USER: defectdojo
+      POSTGRES_PASSWORD: defectdojo
+    volumes:
+      - defectdojo-db-data:/var/lib/postgresql/data
+
+  defectdojo-rabbitmq:
+    image: rabbitmq:3.13-alpine
+    container_name: defectdojo-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: defectdojo
+      RABBITMQ_DEFAULT_PASS: defectdojo
+
+volumes:
+  defectdojo-db-data:
+  defectdojo-media:
