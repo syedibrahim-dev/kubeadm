@@ -161,7 +161,7 @@ cat > /home/ubuntu/deploy-argocd.sh << 'DEPLOY_SCRIPT'
 set -e
 
 echo "Deploying ArgoCD via Terragrunt (Stage 2)..."
-STAGE2_DIR="/home/ubuntu/kubeadm-infra/live/dev/stage2/argocd"
+STAGE2_DIR="/home/ubuntu/kubeadm-infra/live/dev/argocd"
 
 # ── Wait for all nodes to be Ready ──────────────────────────────────────────
 echo "Checking node readiness before deploying..."

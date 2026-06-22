@@ -1,19 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ROOT terragrunt.hcl
-#
-# This file is the single source of truth for:
-#   1. The state backend (local for learning, S3 for production)
-#   2. The AWS provider (generated into every child's .terragrunt-cache directory)
-#   3. Global inputs silently merged into every child unit
-#
 # ZERO BLAST-RADIUS: path_relative_to_include() produces a unique state path
 # per unit. A destroy in one unit cannot affect any other unit's state.
 # Local state lands at state/<path>/terraform.tfstate:
-#   state/dev/stage1/vpc/terraform.tfstate
-#   state/dev/stage1/security/terraform.tfstate
-#   state/dev/stage1/compute/terraform.tfstate
-#   state/dev/stage1/admin/terraform.tfstate
-#   state/dev/stage2/argocd/terraform.tfstate
 
 locals {
   account_vars = read_terragrunt_config("${get_repo_root()}/live/account.hcl")
@@ -24,7 +13,6 @@ locals {
 
 # ── Provider ──────────────────────────────────────────────────────────────────
 # Generated into provider.tf inside every child's .terragrunt-cache directory.
-# Stage 2 (argocd) adds helm/kubernetes/kubectl providers on top via its own
 # generate block — Terraform merges required_providers across .tf files.
 generate "provider_aws" {
   path      = "provider.tf"
@@ -69,13 +57,6 @@ EOF
 #     }
 #   }
 #
-# Bootstrap S3 once before switching:
-#   aws s3 mb s3://<account-id>-terraform-state-us-east-1 --region us-east-1
-#   aws s3api put-bucket-versioning --bucket <account-id>-terraform-state-us-east-1 --versioning-configuration Status=Enabled
-#   aws dynamodb create-table --table-name terraform-locks \
-#     --attribute-definitions AttributeName=LockID,AttributeType=S \
-#     --key-schema AttributeName=LockID,KeyType=HASH \
-#     --billing-mode PAY_PER_REQUEST --region us-east-1
 
 remote_state {
   backend = "local"
