@@ -202,7 +202,7 @@ echo "All nodes initialized. Proceeding with Terragrunt deployment."
 # Kubeconfig is already at ~/.kube/config — Terragrunt reads it via pathexpand()
 # in live/dev/stage2/argocd/terragrunt.hcl. No manual copy needed.
 cd "$STAGE2_DIR"
-terragrunt apply --terragrunt-non-interactive -auto-approve
+terragrunt apply --non-interactive -auto-approve
 
 echo ""
 echo "ArgoCD deployment complete!"
