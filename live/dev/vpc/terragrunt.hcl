@@ -10,11 +10,10 @@ include "env" {
   merge_strategy = "no_merge"
 }
 
-# get_repo_root()// copies the ENTIRE repo into the Terragrunt cache and sets
-# the working directory to modules/vpc. This keeps scripts/ accessible at
-# path.module/../../scripts/ inside the modules (two levels up from any module).
-terraform {
-  source = "${get_repo_root()}//modules/vpc"
+include "envcommon" {
+  path           = "${get_repo_root()}/_envcommon/vpc.hcl"
+  expose         = true
+  merge_strategy = "deep"
 }
 
 inputs = {

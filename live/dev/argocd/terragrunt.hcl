@@ -10,42 +10,12 @@ include "env" {
   merge_strategy = "no_merge"
 }
 
-terraform {
-  source = "${get_repo_root()}//modules/argocd"
+include "envcommon" {
+  path           = "${get_repo_root()}/_envcommon/argocd.hcl"
+  expose         = true
+  merge_strategy = "deep"
 }
 
-locals {
-  # Kubeconfig is written to ~/.kube/config by admin-setup.sh for all users.
-  # pathexpand() resolves ~ at apply time on the machine running Terragrunt
-  # (i.e., the ubuntu user on the admin EC2 for Stage 2).
-  kubeconfig_path = pathexpand("~/.kube/config")
-
-  # ── GitOps ─────────────────────────────────────────────────────────────────
-  repo_url      = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
-  branch        = "main"
-  gitops_path   = "k8s-app/overlays/production"
-  app_namespace = "test-app"
-
-  # ── Helm ───────────────────────────────────────────────────────────────────
-  nginx_chart_version  = "4.10.1"
-  argocd_chart_version = "7.7.11"
-  helm_timeout_seconds = 900
-
-  # ── ALB ────────────────────────────────────────────────────────────────────
-  alb_listener_port          = 80
-  alb_target_port            = 80
-  alb_ingress_cidrs          = ["0.0.0.0/0"]
-  alb_health_check_path      = "/"
-  alb_health_check_interval  = 15
-  alb_healthy_threshold      = 2
-  alb_unhealthy_threshold    = 2
-  alb_health_check_matcher   = "200-404"
-  alb_listener_rule_priority = 1
-}
-
-# ── Dependencies ─────────────────────────────────────────────────────────────
-# Depending on admin (which itself depends on compute → security → vpc) ensures
-# all infrastructure is up before any Helm release is attempted.
 dependency "admin" {
   config_path = "../admin"
 
@@ -56,8 +26,6 @@ dependency "admin" {
   mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply", "destroy"]
 }
 
-# Ordering guard — ensures Stage 1 is complete before Stage 2 runs locally.
-# On the admin EC2 state isn't available so apply falls back to mock outputs.
 dependency "compute" {
   config_path = "../compute"
 
@@ -67,13 +35,9 @@ dependency "compute" {
   }
   mock_outputs_allowed_terraform_commands = ["validate", "plan", "apply", "destroy"]
 }
-
-# ── Stage 2 provider override ─────────────────────────────────────────────────
-# The root generate block writes provider.tf with only the aws provider.
-# This block overwrites that same file (if_exists = "overwrite_terragrunt")
-# with a combined version covering all five providers in a SINGLE
-# required_providers block. Terraform forbids required_providers appearing in
-# more than one terraform{} block across a module — merging here avoids that.
+# Overwrites the root-generated provider.tf with a combined block covering all
+# five providers. Terraform forbids required_providers in more than one
+# terraform{} block — merging here avoids that.
 generate "provider_all" {
   path      = "provider.tf"
   if_exists = "overwrite_terragrunt"
@@ -130,34 +94,31 @@ inputs = {
   aws_region      = include.root.locals.aws_region
   cluster_name    = include.env.locals.cluster_name
   vpc_cidr        = include.env.locals.vpc_cidr
-  kubeconfig_path = local.kubeconfig_path
+  kubeconfig_path = include.envcommon.locals.kubeconfig_path
 
-  # Helm chart versions and timeout — composed into the object the module expects
   helm = {
-    nginx_chart_version  = local.nginx_chart_version
-    argocd_chart_version = local.argocd_chart_version
-    timeout_seconds      = local.helm_timeout_seconds
+    nginx_chart_version  = "4.10.1"
+    argocd_chart_version = "7.7.11"
+    timeout_seconds      = 900
   }
 
-  # GitOps — composed into the object the module expects
   gitops = {
-    repo_url      = local.repo_url
-    branch        = local.branch
-    path          = local.gitops_path
-    app_namespace = local.app_namespace
+    repo_url      = "https://github.com/syedibrahim-dev/kubeadm-gitops.git"
+    branch        = "main"
+    path          = "k8s-app/overlays/production"
+    app_namespace = "test-app"
   }
 
-  # ALB — composed into the object the module expects
   alb_settings = {
-    listener_port          = local.alb_listener_port
-    target_port            = local.alb_target_port
-    ingress_cidrs          = local.alb_ingress_cidrs
-    health_check_path      = local.alb_health_check_path
-    health_check_interval  = local.alb_health_check_interval
-    healthy_threshold      = local.alb_healthy_threshold
-    unhealthy_threshold    = local.alb_unhealthy_threshold
-    health_check_matcher   = local.alb_health_check_matcher
-    listener_rule_priority = local.alb_listener_rule_priority
+    listener_port          = 80
+    target_port            = 80
+    ingress_cidrs          = ["0.0.0.0/0"]
+    health_check_path      = "/"
+    health_check_interval  = 15
+    healthy_threshold      = 2
+    unhealthy_threshold    = 2
+    health_check_matcher   = "200-404"
+    listener_rule_priority = 1
   }
 
   tags = {

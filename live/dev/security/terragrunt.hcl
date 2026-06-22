@@ -10,14 +10,12 @@ include "env" {
   merge_strategy = "no_merge"
 }
 
-terraform {
-  source = "${get_repo_root()}//modules/security"
+include "envcommon" {
+  path           = "${get_repo_root()}/_envcommon/security.hcl"
+  expose         = true
+  merge_strategy = "deep"
 }
 
-# ── Dependency ────────────────────────────────────────────────────────────────
-# Reads vpc's remote state to extract vpc_id. No terraform_remote_state data
-# source in any .tf file — Terragrunt resolves this at the wrapper level.
-# mock_outputs allow `terragrunt plan` to run on a cold start with no real state.
 dependency "vpc" {
   config_path = "../vpc"
 

@@ -10,17 +10,10 @@ include "env" {
   merge_strategy = "no_merge"
 }
 
-terraform {
-  source = "${get_repo_root()}//modules/admin"
-}
-
-locals {
-  admin_instance_type = "t3.micro"
-  admin_name          = "K8s-Admin"
-  terraform_version   = "1.10.5"
-  terragrunt_version  = "0.75.10"
-  enable_auto_deploy  = true
-  github_repo         = "syedibrahim-dev/kubeadm"
+include "envcommon" {
+  path           = "${get_repo_root()}/_envcommon/admin.hcl"
+  expose         = true
+  merge_strategy = "deep"
 }
 
 dependency "vpc" {
@@ -56,29 +49,20 @@ dependency "compute" {
 }
 
 inputs = {
-  cluster_name      = include.env.locals.cluster_name
-  aws_region        = include.root.locals.aws_region
-  private_subnet_id = dependency.vpc.outputs.private_subnet_id
-  nat_gateway_id    = dependency.vpc.outputs.nat_gateway_id
-
-  # admin/variables.tf names this security_group_id (not admin_sg_id)
-  security_group_id = dependency.security.outputs.admin_sg_id
-
-  # Explicit dependency on compute — admin-setup.sh waits for the cluster
-  # to be up before bootstrapping kubectl and triggering Stage 2.
-  # These values are passed to the admin-setup.sh template.
+  aws_region               = include.root.locals.aws_region
+  control_plane_name       = include.env.locals.control_plane_name
+  k8s_version              = include.env.locals.k8s_version
+  enable_auto_setup        = include.env.locals.enable_auto_setup
+  private_subnet_id        = dependency.vpc.outputs.private_subnet_id
+  nat_gateway_id           = dependency.vpc.outputs.nat_gateway_id
+  security_group_id        = dependency.security.outputs.admin_sg_id
   control_plane_private_ip = dependency.compute.outputs.control_plane_private_ip
   worker_count             = dependency.compute.outputs.worker_count
-
-  instance_type      = local.admin_instance_type
-  admin_name         = local.admin_name
-  terraform_version  = local.terraform_version
-  terragrunt_version = local.terragrunt_version
-  enable_auto_setup  = include.env.locals.enable_auto_setup
-  enable_auto_deploy = local.enable_auto_deploy
-  github_repo        = local.github_repo
-  control_plane_name = include.env.locals.control_plane_name
-  k8s_version        = include.env.locals.k8s_version
+  instance_type            = "t3.micro"
+  terraform_version        = "1.10.5"
+  terragrunt_version       = "0.75.10"
+  enable_auto_deploy       = true
+  github_repo              = "syedibrahim-dev/kubeadm"
 
   tags = {
     Project     = include.env.locals.cluster_name
