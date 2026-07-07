@@ -2,7 +2,7 @@
 # ROOT terragrunt.hcl
 # ZERO BLAST-RADIUS: path_relative_to_include() produces a unique state path
 # per unit. A destroy in one unit cannot affect any other unit's state.
-# Local state lands at state/<path>/terraform.tfstate:
+
 
 locals {
   account_vars = read_terragrunt_config("${get_repo_root()}/live/account.hcl")
