@@ -35,33 +35,14 @@ provider "aws" {
 EOF
 }
 
-# ── Remote State ──────────────────────────────────────────────────────────────
-# LEARNING MODE: local backend — state files land in state/ at the repo root.
-# Each unit gets its own isolated .tfstate file via path_relative_to_include(),
-# which is what makes dependency {} blocks work (they can find sibling state).
-#
-# To switch to S3 for production, replace this block with:
-#
-#   remote_state {
-#     backend = "s3"
-#     config = {
-#       encrypt        = true
-#       bucket         = "${local.aws_account_id}-terraform-state-${local.aws_region}"
-#       key            = "${path_relative_to_include()}/terraform.tfstate"
-#       region         = local.aws_region
-#       dynamodb_table = "terraform-locks"
-#     }
-#     generate = {
-#       path      = "backend.tf"
-#       if_exists = "overwrite_terragrunt"
-#     }
-#   }
-#
-
 remote_state {
-  backend = "local"
+  backend = "s3"
   config = {
-    path = "${get_repo_root()}/state/${path_relative_to_include()}/terraform.tfstate"
+    bucket         = "kubeadm-tfstate-${local.aws_account_id}"
+    key            = "${path_relative_to_include()}/terraform.tfstate"
+    region         = local.aws_region
+    encrypt        = true
+    dynamodb_table = "kubeadm-tfstate-locks"
   }
   generate = {
     path      = "backend.tf"
