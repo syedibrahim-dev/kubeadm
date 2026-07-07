@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # ACCOUNT-LEVEL config — one file per AWS account.
-# Place a different account.hcl in each account root if you add multi-account.
+# Place a different account.hcl in each account root if you add multi-account. MULTIACCOUNT SETUP
 # ─────────────────────────────────────────────────────────────────────────────
 
 locals {
